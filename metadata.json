@@ -1,0 +1,6 @@
+{
+  "name": "Architechnix & OmniOps - Flex Wizard & Advisory Portal",
+  "description": "Asynchronous solo-advisory commercial portal and 6-phase interactive enterprise architecture learning curriculum with OPA Rego scanner, Stripe webhook simulator, and zero-meeting intake engine.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
