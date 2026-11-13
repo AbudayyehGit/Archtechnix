@@ -1,16 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  GitBranch, 
   ShieldCheck, 
-  Lock, 
-  Terminal, 
   CheckCircle2, 
   ExternalLink, 
   Zap, 
   Key, 
-  Layers, 
-  ChevronDown, 
-  ChevronUp, 
   AlertCircle, 
   Check, 
   Copy, 
@@ -36,7 +30,6 @@ export const IntegrationsSection: React.FC<IntegrationsSectionProps> = ({
   const [githubUser, setGithubUser] = useState<string>('AbudayyehGit');
   const [connectedScopes, setConnectedScopes] = useState<string[]>(['repo', 'admin:repo_hook', 'read:org']);
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
-  const [showSetupGuide, setShowSetupGuide] = useState<boolean>(false);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
 
   // Provisioning state

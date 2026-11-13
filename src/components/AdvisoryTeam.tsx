@@ -1,14 +1,9 @@
 import React from 'react';
 import { 
-  ShieldCheck, 
-  Database, 
-  Lock, 
   Terminal, 
   GitPullRequest, 
   CheckCircle2, 
-  Layers, 
-  Award,
-  ExternalLink
+  Layers
 } from 'lucide-react';
 
 export interface ArchitectProfile {

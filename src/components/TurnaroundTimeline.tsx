@@ -12,14 +12,11 @@ import {
   Lock, 
   Terminal,
   Layers,
-  Sparkles,
   Cpu,
   Award,
   X,
-  ExternalLink,
   GitBranch,
   CheckCircle,
-  HelpCircle,
   Zap,
   Info
 } from 'lucide-react';

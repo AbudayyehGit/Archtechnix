@@ -3,17 +3,13 @@ import {
   Calendar as CalendarIcon, 
   Clock, 
   CheckCircle2, 
-  User, 
   Video, 
   Download, 
   ChevronLeft, 
   ChevronRight, 
   Globe, 
   X, 
-  Sparkles, 
   GitBranch, 
-  ShieldCheck, 
-  Layers,
   Copy,
   Check,
   CalendarCheck
@@ -268,10 +264,6 @@ END:VCALENDAR`;
       (b) => b.date === dateStr && b.timeSlot === timeSlot && b.architectId === architectId
     );
   };
-
-  const activeArchitects = selectedArchitectId === 'all' 
-    ? ARCHITECTS 
-    : ARCHITECTS.filter((a) => a.id === selectedArchitectId);
 
   return (
     <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 sm:p-8 backdrop-blur-sm shadow-xl">

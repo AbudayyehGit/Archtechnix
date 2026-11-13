@@ -85,15 +85,6 @@ html:not(.light) header {
   border-color: #1e293b !important;
 }
 
-html.dark .ai-studio-card, 
-html.dark .panel,
-html:not(.light) .ai-studio-card,
-html:not(.light) .panel {
-  background-color: #0f172a !important;
-  color: var(--inv-dev-obsidian) !important;
-  border-color: #1e293b !important;
-}
-
 /* ==========================================================================
    THEME 2: Standard High-Contrast Light Mode
    ========================================================================== */
@@ -114,14 +105,6 @@ html.light header {
   background-color: rgba(255, 255, 255, 0.95) !important;
   border-color: #e2e8f0 !important;
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-}
-
-html.light .ai-studio-card,
-html.light .panel {
-  background-color: #ffffff !important;
-  color: #0f172a !important;
-  border-color: #e2e8f0 !important;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
 }
 
 /* High-Contrast Light Mode Surface & Border Overrides */
@@ -220,17 +203,6 @@ html.light select {
   border-color: #cbd5e1 !important;
 }
 
-/* Primary CTA elements utilize High-Conversion Orange (#F97316) in both themes */
-.btn-primary, button.cta {
-  background-color: #f97316 !important;
-  color: #FFFFFF !important;
-}
-
-.btn-accent {
-  background-color: var(--inv-dev-accent-cyan) !important;
-  color: #000000 !important;
-}
-
 /* Mobile responsive constraints for screens < 400px: Prevent brand & portal occlusion during orientation changes */
 @media (max-width: 399px) {
   #root > div > header > div.max-w-7xl.mx-auto.px-2\.5\.sm\:px-6\.lg\:px-8\.h-16\.flex\.items-center\.justify-between\.gap-1\.5\.sm\:gap-4,
@@ -253,12 +225,6 @@ html.light select {
 
   .brand-lockup-container > div {
     overflow: visible !important;
-    white-space: nowrap !important;
-  }
-
-  .brand-secondary-text {
-    font-size: 0.7rem !important;
-    display: inline !important;
     white-space: nowrap !important;
   }
 

@@ -2,19 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { 
   GitBranch, 
   ShieldCheck, 
-  Lock, 
   Terminal, 
   CheckCircle2, 
   Clock, 
   Copy, 
   Check, 
   Zap, 
-  RefreshCw, 
-  Search, 
   Key, 
   Cpu, 
-  FileCode2,
-  AlertCircle
+  FileCode2
 } from 'lucide-react';
 
 export interface AutomationEvent {

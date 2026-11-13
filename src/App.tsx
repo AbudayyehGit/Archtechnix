@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Briefcase, 
   GraduationCap, 
@@ -24,7 +24,16 @@ import {
   Calendar
 } from 'lucide-react';
 import { PRICING_TIERS, OPERATIONAL_DOCS, PROTOTYPE_PORTFOLIO, CURRICULUM_PHASES } from './data';
-import { IntakeSpecData, ModalPayload } from './types';
+import {
+  AdaptedSkillBlueprint,
+  EvolutionStatus,
+  IntakeSpecData,
+  IntakeValidationThresholds,
+  ModalPayload,
+  RequirementSpec,
+  SkillEvolutionLog,
+  SystemSteadyState,
+} from './types';
 import { PricingCalculator } from './components/PricingCalculator';
 import { IntakeGenerator } from './components/IntakeGenerator';
 import { OpaScanner } from './components/OpaScanner';
@@ -42,12 +51,19 @@ import { RpoRtoBenchmarkChart } from './components/RpoRtoBenchmarkChart';
 import { BottleneckAssessment } from './components/BottleneckAssessment';
 import { PilotAuditDashboard } from './components/PilotAuditDashboard';
 import { RetainerGovernanceHub } from './components/RetainerGovernanceHub';
+import { GovernanceSteadyStateConsole } from './components/GovernanceSteadyStateConsole';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { useAuth } from './contexts/AuthContext';
 import { offlineDb } from './lib/offlineDb';
+import {
+  DEFAULT_INTAKE_THRESHOLDS,
+  DEFAULT_REQUIREMENT_SPECS,
+  DEFAULT_SKILL_BLUEPRINT,
+} from './lib/governanceEngine';
 
 const STORAGE_KEY = 'omniops_architechnix_state_v2';
+const GOVERNANCE_STORAGE_KEY = 'archtechnix_governance_v1';
 
 type PortalTab = 'funnel' | 'audit' | 'retainer';
 
@@ -88,6 +104,18 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isCheckingOut, setIsCheckingOut] = useState<boolean>(false);
   const [webhookTriggered, setWebhookTriggered] = useState<boolean>(false);
+
+  // Governance, Idempotent Guards, Steady-State Checkpoints & Evolutionary Skill Builder
+  const [requirementSpecs, setRequirementSpecs] = useState<RequirementSpec[]>(DEFAULT_REQUIREMENT_SPECS);
+  const [steadyStates, setSteadyStates] = useState<SystemSteadyState[]>([]);
+  const [evolutionLogs, setEvolutionLogs] = useState<SkillEvolutionLog[]>([]);
+  const [intakeThresholds, setIntakeThresholds] = useState<IntakeValidationThresholds>(
+    DEFAULT_INTAKE_THRESHOLDS
+  );
+  const [adaptedBlueprint, setAdaptedBlueprint] = useState<AdaptedSkillBlueprint>(
+    DEFAULT_SKILL_BLUEPRINT
+  );
+  const [governanceHydrated, setGovernanceHydrated] = useState<boolean>(false);
 
   // Check for Stripe Checkout return parameters (?status=success&session_id=...)
   useEffect(() => {
@@ -207,6 +235,84 @@ Operational Pipeline:
     }
   }, [mode, portalTab, currentPhase, completedPhases, quizAnswers, selectedTier, selectedAddons, intakeData]);
 
+  // Hydrate governance telemetry & steady-state checkpoints (localStorage + Express API)
+  useEffect(() => {
+    let active = true;
+    try {
+      const savedGov = localStorage.getItem(GOVERNANCE_STORAGE_KEY);
+      if (savedGov) {
+        const parsed = JSON.parse(savedGov);
+        if (Array.isArray(parsed.requirementSpecs)) setRequirementSpecs(parsed.requirementSpecs);
+        if (Array.isArray(parsed.steadyStates)) setSteadyStates(parsed.steadyStates);
+        if (Array.isArray(parsed.evolutionLogs)) setEvolutionLogs(parsed.evolutionLogs);
+        if (parsed.intakeThresholds) setIntakeThresholds(parsed.intakeThresholds);
+        if (parsed.adaptedBlueprint) setAdaptedBlueprint(parsed.adaptedBlueprint);
+      }
+    } catch (e) {
+      console.warn('Governance localStorage load error', e);
+    }
+
+    fetch('/api/governance/state')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !data) return;
+        if (Array.isArray(data.steadyStates)) {
+          setSteadyStates((prev) => {
+            const seen = new Set(prev.map((s) => s.id));
+            const merged = [...prev];
+            for (const item of data.steadyStates as SystemSteadyState[]) {
+              if (!seen.has(item.id)) merged.push(item);
+            }
+            return merged.length > 0 ? merged : data.steadyStates;
+          });
+        }
+        if (Array.isArray(data.evolutionLogs)) {
+          setEvolutionLogs((prev) => {
+            const seen = new Set(prev.map((l) => l.id));
+            const merged = [...prev];
+            for (const item of data.evolutionLogs as SkillEvolutionLog[]) {
+              if (!seen.has(item.id)) merged.push(item);
+            }
+            return merged.length > 0 ? merged : data.evolutionLogs;
+          });
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setGovernanceHydrated(true);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Persist governance state to localStorage on mutation
+  useEffect(() => {
+    if (!governanceHydrated) return;
+    try {
+      localStorage.setItem(
+        GOVERNANCE_STORAGE_KEY,
+        JSON.stringify({
+          requirementSpecs,
+          steadyStates,
+          evolutionLogs,
+          intakeThresholds,
+          adaptedBlueprint,
+        })
+      );
+    } catch (e) {
+      console.warn('Governance localStorage save error', e);
+    }
+  }, [
+    governanceHydrated,
+    requirementSpecs,
+    steadyStates,
+    evolutionLogs,
+    intakeThresholds,
+    adaptedBlueprint,
+  ]);
+
   const showToast = (message: string) => {
     setToastMessage(message);
     setTimeout(() => {
@@ -214,9 +320,48 @@ Operational Pipeline:
     }, 3200);
   };
 
+  const handleCommitSteadyState = (stateRecord: SystemSteadyState) => {
+    setSteadyStates((prev) => [stateRecord, ...prev]);
+    fetch('/api/governance/steady-states', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(stateRecord),
+    }).catch(() => {});
+  };
+
+  const handleRecordEvolution = (
+    logEntry: SkillEvolutionLog,
+    nextThresholds: IntakeValidationThresholds,
+    nextBlueprint: AdaptedSkillBlueprint,
+    didAutoAdapt: boolean
+  ) => {
+    setEvolutionLogs((prev) => [logEntry, ...prev]);
+    if (didAutoAdapt) {
+      setIntakeThresholds(nextThresholds);
+      setAdaptedBlueprint(nextBlueprint);
+    }
+    fetch('/api/governance/evolution', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(logEntry),
+    }).catch(() => {});
+  };
+
+  const handleUpdateEvolutionStatus = (id: string, status: EvolutionStatus) => {
+    setEvolutionLogs((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, evolution_status: status } : item))
+    );
+    fetch(`/api/governance/evolution/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ evolution_status: status }),
+    }).catch(() => {});
+  };
+
   const handleResetData = () => {
     if (window.confirm('Reset all saved wizard progress, quiz answers, and intake drafts?')) {
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(GOVERNANCE_STORAGE_KEY);
       window.location.reload();
     }
   };
@@ -664,6 +809,10 @@ ${JSON.stringify(webhookEvent, null, 2)}
                         Sync Calendar
                       </button>
                       <span className="text-slate-700" aria-hidden="true">·</span>
+                      <button onClick={() => navigateToModule('retainer', 'governance-steady-state-section')} className="text-slate-300 hover:text-orange-400 transition-colors underline underline-offset-2">
+                        Steady-State & Guards
+                      </button>
+                      <span className="text-slate-700" aria-hidden="true">·</span>
                       <button onClick={() => setMode('academy')} className="text-cyan-400 hover:text-cyan-300 transition-colors underline underline-offset-2">
                         Flex Wizard
                       </button>
@@ -780,6 +929,7 @@ ${JSON.stringify(webhookEvent, null, 2)}
                     intakeData={intakeData}
                     onUpdate={setIntakeData}
                     onShowToast={showToast}
+                    thresholds={intakeThresholds}
                   />
                 </div>
               </section>
@@ -953,6 +1103,21 @@ ${JSON.stringify(webhookEvent, null, 2)}
                         repo: repoData.repoUrl
                       }));
                     }}
+                  />
+                </div>
+              </section>
+
+              {/* Idempotent Guards, Steady-State Checkpoints & Supabase RLS Migration */}
+              <section id="governance-steady-state-section" className="py-16 bg-slate-900/30 border-b border-slate-800">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                  <GovernanceSteadyStateConsole
+                    requirementSpecs={requirementSpecs}
+                    onUpdateSpecs={setRequirementSpecs}
+                    steadyStates={steadyStates}
+                    onCommitSteadyState={handleCommitSteadyState}
+                    intakeThresholds={intakeThresholds}
+                    adaptedBlueprint={adaptedBlueprint}
+                    onShowToast={showToast}
                   />
                 </div>
               </section>
@@ -1224,6 +1389,11 @@ ${JSON.stringify(webhookEvent, null, 2)}
               onSubmitQuiz={handleQuizSubmit}
               onOpenDoc={handleOpenDoc}
               onShowToast={showToast}
+              evolutionLogs={evolutionLogs}
+              intakeThresholds={intakeThresholds}
+              adaptedBlueprint={adaptedBlueprint}
+              onRecordEvaluation={handleRecordEvolution}
+              onUpdateLogStatus={handleUpdateEvolutionStatus}
             />
           </section>
         </main>

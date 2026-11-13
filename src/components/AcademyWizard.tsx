@@ -12,8 +12,15 @@ import {
   Code2
 } from 'lucide-react';
 import { CURRICULUM_PHASES } from '../data';
-import { CurriculumPhase } from '../types';
+import {
+  AdaptedSkillBlueprint,
+  CurriculumPhase,
+  EvolutionStatus,
+  IntakeValidationThresholds,
+  SkillEvolutionLog,
+} from '../types';
 import { RpoRtoBenchmarkChart } from './RpoRtoBenchmarkChart';
+import { EvolutionarySkillBuilder } from './EvolutionarySkillBuilder';
 
 interface AcademyWizardProps {
   currentPhaseNum: number;
@@ -23,6 +30,16 @@ interface AcademyWizardProps {
   onSubmitQuiz: (phase: number, answerIndex: number) => void;
   onOpenDoc: (docKey: 'masa' | 'checklist' | 'glossary') => void;
   onShowToast: (message: string) => void;
+  evolutionLogs: SkillEvolutionLog[];
+  intakeThresholds: IntakeValidationThresholds;
+  adaptedBlueprint: AdaptedSkillBlueprint;
+  onRecordEvaluation: (
+    logEntry: SkillEvolutionLog,
+    nextThresholds: IntakeValidationThresholds,
+    nextBlueprint: AdaptedSkillBlueprint,
+    didAutoAdapt: boolean
+  ) => void;
+  onUpdateLogStatus: (id: string, status: EvolutionStatus) => void;
 }
 
 export const AcademyWizard: React.FC<AcademyWizardProps> = ({
@@ -32,7 +49,12 @@ export const AcademyWizard: React.FC<AcademyWizardProps> = ({
   quizAnswers,
   onSubmitQuiz,
   onOpenDoc,
-  onShowToast
+  onShowToast,
+  evolutionLogs,
+  intakeThresholds,
+  adaptedBlueprint,
+  onRecordEvaluation,
+  onUpdateLogStatus,
 }) => {
   const [copiedCode, setCopiedCode] = useState<boolean>(false);
   const phase: CurriculumPhase = CURRICULUM_PHASES[currentPhaseNum - 1];
@@ -251,6 +273,18 @@ export const AcademyWizard: React.FC<AcademyWizardProps> = ({
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Evolutionary Skill Builder Engine (Meta-Prompt Adaptation & Telemetry) */}
+      <div className="pt-8 border-t border-slate-800">
+        <EvolutionarySkillBuilder
+          evolutionLogs={evolutionLogs}
+          intakeThresholds={intakeThresholds}
+          adaptedBlueprint={adaptedBlueprint}
+          onRecordEvaluation={onRecordEvaluation}
+          onUpdateLogStatus={onUpdateLogStatus}
+          onShowToast={onShowToast}
+        />
       </div>
     </div>
   );

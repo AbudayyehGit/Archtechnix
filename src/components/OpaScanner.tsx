@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Play, RotateCcw, Shield, CheckCircle2, AlertTriangle, FileCode2 } from 'lucide-react';
+import { Play, Shield, CheckCircle2, AlertTriangle, FileCode2 } from 'lucide-react';
 
 interface OPAResult {
   allowed: boolean;

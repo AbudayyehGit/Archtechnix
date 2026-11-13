@@ -12,7 +12,8 @@ import {
   Send,
   ShieldCheck,
 } from 'lucide-react';
-import { IntakeSpecData } from '../types';
+import { IntakeSpecData, IntakeValidationThresholds } from '../types';
+import { DEFAULT_INTAKE_THRESHOLDS } from '../lib/governanceEngine';
 import { offlineDb } from '../lib/offlineDb';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -20,6 +21,7 @@ interface IntakeGeneratorProps {
   intakeData: IntakeSpecData;
   onUpdate: (data: IntakeSpecData) => void;
   onShowToast: (message: string) => void;
+  thresholds?: IntakeValidationThresholds;
 }
 
 interface FieldValidation {
@@ -47,6 +49,7 @@ export const IntakeGenerator: React.FC<IntakeGeneratorProps> = ({
   intakeData,
   onUpdate,
   onShowToast,
+  thresholds = DEFAULT_INTAKE_THRESHOLDS,
 }) => {
   const { user, idToken, signInWithGoogle, refreshWorkspace } = useAuth();
   const [copied, setCopied] = useState<boolean>(false);
@@ -94,21 +97,26 @@ export const IntakeGenerator: React.FC<IntakeGeneratorProps> = ({
       intakeData.compliance.nist,
     ].filter(Boolean).length;
 
+    const minCompliance = thresholds.minComplianceMandates;
     const complianceCheck: FieldValidation =
-      activeComplianceCount >= 1
+      activeComplianceCount >= minCompliance
         ? {
             valid: true,
-            message: `${activeComplianceCount} regulatory mandate${activeComplianceCount > 1 ? 's' : ''} active`,
+            message: `${activeComplianceCount} regulatory mandate${activeComplianceCount > 1 ? 's' : ''} active (min ${minCompliance})`,
           }
-        : { valid: false, message: 'Select at least 1 compliance mandate (SOC2, ISO/GDPR, or NIST).' };
-
-    const notesLen = intakeData.notes.trim().length;
-    const notesCheck: FieldValidation =
-      notesLen >= 25
-        ? { valid: true, message: `Detailed context ready (${notesLen} chars)` }
         : {
             valid: false,
-            message: `Add ${Math.max(1, 25 - notesLen)} more characters describing architectural bottlenecks.`,
+            message: `Select at least ${minCompliance} compliance mandate${minCompliance > 1 ? 's' : ''} (SOC2, ISO/GDPR, or NIST).`,
+          };
+
+    const minNotes = thresholds.minNotesChars;
+    const notesLen = intakeData.notes.trim().length;
+    const notesCheck: FieldValidation =
+      notesLen >= minNotes
+        ? { valid: true, message: `Detailed context ready (${notesLen} / ${minNotes} min chars)` }
+        : {
+            valid: false,
+            message: `Add ${Math.max(1, minNotes - notesLen)} more characters describing architectural bottlenecks (${minNotes} min).`,
           };
 
     const steps = [
@@ -135,12 +143,13 @@ export const IntakeGenerator: React.FC<IntakeGeneratorProps> = ({
       progressPercent,
       isSpecReady: completedCount === steps.length,
     };
-  }, [intakeData]);
+  }, [intakeData, thresholds]);
 
   const compiledMarkdown = `# ARCHTECHNIX SCHEDULE A: ASYNC-BY-DEFAULT INTAKE SPEC
 Compiled Timestamp: ${new Date().toISOString()}
 Authorizing Entity: ${intakeData.org || 'Pending Organization'}
 Spec Readiness: ${validation.progressPercent}% (${validation.completedCount}/${validation.totalCount} Verified)
+Adaptive Intake Gate: >= ${thresholds.minNotesChars} chars · >= ${thresholds.minComplianceMandates} mandate(s) · Window ${thresholds.diagnosticWindowDays}d${thresholds.retainerEscalationActive ? ' [TIER-2 RETAINER ESCALATION GUARD ACTIVE]' : ''}
 Status: ${validation.isSpecReady ? 'SPEC_LOCKED_READY_FOR_PROVISIONING' : 'DRAFT_IN_PROGRESS'}
 
 ## 1. Enterprise Infrastructure Profile
@@ -282,6 +291,23 @@ Status: ${validation.isSpecReady ? 'SPEC_LOCKED_READY_FOR_PROVISIONING' : 'DRAFT
 
   return (
     <div className="space-y-6">
+      {thresholds.retainerEscalationActive && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-start space-x-2.5 text-xs">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-mono font-bold text-amber-300 uppercase tracking-wider">
+                Evolutionary Skill Guard Active · Tier 2 Retainer Escalation Triggered
+              </span>
+              <p className="text-slate-300 mt-0.5 leading-relaxed">{thresholds.adaptedRuleReason}</p>
+            </div>
+          </div>
+          <span className="text-[11px] font-mono text-amber-300 bg-slate-950/80 border border-amber-500/30 px-2.5 py-1 rounded-md shrink-0 tabular-nums">
+            {thresholds.minNotesChars} chars · {thresholds.minComplianceMandates} mandates
+          </span>
+        </div>
+      )}
+
       {/* Specification Readiness Progress Bar & Verification Checklist */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
@@ -523,10 +549,12 @@ Status: ${validation.isSpecReady ? 'SPEC_LOCKED_READY_FOR_PROVISIONING' : 'DRAFT
               </label>
               <span
                 className={`text-[10px] font-mono tabular-nums ${
-                  intakeData.notes.trim().length >= 25 ? 'text-emerald-400' : 'text-amber-400'
+                  intakeData.notes.trim().length >= thresholds.minNotesChars
+                    ? 'text-emerald-400'
+                    : 'text-amber-400'
                 }`}
               >
-                {intakeData.notes.trim().length} / 25 min chars
+                {intakeData.notes.trim().length} / {thresholds.minNotesChars} min chars
               </span>
             </div>
             <textarea

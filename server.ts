@@ -520,7 +520,7 @@ app.get('/api/auth/github/url', (req: Request, res: Response) => {
 
 // 2. GitHub OAuth Callback Route (popup closes and posts message to window.opener)
 const githubCallbackHandler = async (req: Request, res: Response) => {
-  const { code, state } = req.query;
+  const { code } = req.query;
   const clientId = process.env.GITHUB_CLIENT_ID || process.env.CLIENT_ID;
   const clientSecret = process.env.GITHUB_CLIENT_SECRET || process.env.CLIENT_SECRET;
 
@@ -918,6 +918,121 @@ END:VCALENDAR`;
     console.error('Booking error:', error);
     return res.status(500).json({ error: error.message || 'Failed to complete booking' });
   }
+});
+
+// ============================================================================
+// GOVERNANCE, STEADY-STATE CHECKPOINTS & EVOLUTIONARY SKILL BUILDER API
+// ============================================================================
+
+const governanceStore = {
+  steadyStates: [
+    {
+      id: 'c8f12e40-8b1a-4c31-9e1b-10a2b3c4d5e6',
+      checkpoint_label: 'baseline-steady-state-v1.0',
+      git_commit_hash: '7a9f4c21',
+      snapshot_metadata: {
+        blueprintVersion: 'v1.0.0-baseline',
+        cleanupClean: true,
+        intakeMinNotesChars: 25,
+        intakeMinComplianceMandates: 1,
+        rlsEnforcedRole: 'admin_architect'
+      },
+      established_at: new Date('2026-11-11T10:00:00Z').toISOString()
+    }
+  ] as Array<{
+    id: string;
+    checkpoint_label: string;
+    git_commit_hash: string;
+    snapshot_metadata: Record<string, unknown>;
+    established_at: string;
+  }>,
+  evolutionLogs: [
+    {
+      id: 'd4a21b90-4f7c-412e-8a9b-99c8d7e6f5a4',
+      skill_name: '14-Day Pilot Audit & Data Mesh Topology',
+      performance_metric: {
+        sprintType: 'pilot_audit_14d',
+        deliveryDays: 12,
+        targetWindowDays: 14,
+        outOfScopeFlags: 1,
+        architectVelocityScore: 94,
+        rpoVerifiedMinutes: 11
+      },
+      client_requirement_delta: 'Verified baseline: single VPC boundary with Aurora WAL replication inside 14-day SLA.',
+      evolution_status: 'pending_review',
+      created_at: new Date('2026-11-11T18:30:00Z').toISOString()
+    }
+  ] as Array<{
+    id: string;
+    skill_name: string;
+    performance_metric: Record<string, unknown>;
+    client_requirement_delta: string;
+    evolution_status: 'pending_review' | 'auto_adapted' | 'archived';
+    created_at: string;
+  }>
+};
+
+app.get('/api/governance/state', (_req: Request, res: Response) => {
+  res.json({
+    success: true,
+    steadyStates: governanceStore.steadyStates,
+    evolutionLogs: governanceStore.evolutionLogs
+  });
+});
+
+app.post('/api/governance/steady-states', (req: Request, res: Response) => {
+  const { id, checkpoint_label, git_commit_hash, snapshot_metadata, established_at } = req.body || {};
+  if (!checkpoint_label || !git_commit_hash) {
+    return res.status(400).json({ error: 'checkpoint_label and git_commit_hash are required.' });
+  }
+  const record = {
+    id: String(id || `ss-${Date.now().toString(36)}`),
+    checkpoint_label: String(checkpoint_label),
+    git_commit_hash: String(git_commit_hash),
+    snapshot_metadata: typeof snapshot_metadata === 'object' && snapshot_metadata ? snapshot_metadata : {},
+    established_at: String(established_at || new Date().toISOString())
+  };
+  governanceStore.steadyStates.unshift(record);
+  return res.status(201).json({ success: true, steadyState: record });
+});
+
+app.post('/api/governance/evolution', (req: Request, res: Response) => {
+  const { id, skill_name, performance_metric, client_requirement_delta, evolution_status, created_at } = req.body || {};
+  if (!skill_name || !performance_metric) {
+    return res.status(400).json({ error: 'skill_name and performance_metric are required.' });
+  }
+  const validStatus =
+    evolution_status === 'auto_adapted' || evolution_status === 'archived'
+      ? evolution_status
+      : 'pending_review';
+  const entry = {
+    id: String(id || `evo-${Date.now().toString(36)}`),
+    skill_name: String(skill_name),
+    performance_metric,
+    client_requirement_delta: String(client_requirement_delta || ''),
+    evolution_status: validStatus as 'pending_review' | 'auto_adapted' | 'archived',
+    created_at: String(created_at || new Date().toISOString())
+  };
+  governanceStore.evolutionLogs.unshift(entry);
+  return res.status(201).json({ success: true, log: entry });
+});
+
+app.patch('/api/governance/evolution/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { evolution_status } = req.body || {};
+  if (
+    evolution_status !== 'pending_review' &&
+    evolution_status !== 'auto_adapted' &&
+    evolution_status !== 'archived'
+  ) {
+    return res.status(400).json({ error: 'Invalid evolution_status value.' });
+  }
+  const target = governanceStore.evolutionLogs.find((item) => item.id === id);
+  if (!target) {
+    return res.status(404).json({ error: 'Skill evolution log not found.' });
+  }
+  target.evolution_status = evolution_status;
+  return res.json({ success: true, log: target });
 });
 
 // Health check endpoint

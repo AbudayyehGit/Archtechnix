@@ -4,9 +4,7 @@ import {
   ChevronDown, 
   ShieldCheck, 
   Clock, 
-  Lock, 
   FileCode2, 
-  Search, 
   Layers 
 } from 'lucide-react';
 
