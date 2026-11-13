@@ -40,6 +40,7 @@ import { AdvisoryTeam } from './components/AdvisoryTeam';
 import { AdvisoryAvailability } from './components/AdvisoryAvailability';
 import { IntegrationsSection } from './components/IntegrationsSection';
 import { FaqSection } from './components/FaqSection';
+import { RpoRtoBenchmarkChart } from './components/RpoRtoBenchmarkChart';
 
 const STORAGE_KEY = 'omniops_architechnix_state_v2';
 
@@ -423,6 +424,13 @@ ${JSON.stringify(webhookEvent, null, 2)}
     }
   };
 
+  const scrollToRpoRto = () => {
+    const el = document.getElementById('rpo-rto-section');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
   const progressPercentage = Math.round((completedPhases.length / 6) * 100);
 
   return (
@@ -598,6 +606,10 @@ ${JSON.stringify(webhookEvent, null, 2)}
                     CTO Success Stories
                   </button>
                   <span className="text-slate-700" aria-hidden="true">·</span>
+                  <button onClick={scrollToRpoRto} className="text-slate-300 hover:text-cyan-400 transition-colors underline underline-offset-2">
+                    Sub-15m RPO/RTO Benchmarks
+                  </button>
+                  <span className="text-slate-700" aria-hidden="true">·</span>
                   <button onClick={scrollToFaq} className="text-slate-300 hover:text-teal-400 transition-colors underline underline-offset-2">
                     FAQ
                   </button>
@@ -747,6 +759,13 @@ ${JSON.stringify(webhookEvent, null, 2)}
               </div>
 
               <OpaScanner />
+            </div>
+          </section>
+
+          {/* Sub-15m RPO/RTO Disaster Recovery Benchmark Visualization */}
+          <section id="rpo-rto-section" className="py-16 bg-slate-900/40 border-b border-slate-800">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <RpoRtoBenchmarkChart />
             </div>
           </section>
 

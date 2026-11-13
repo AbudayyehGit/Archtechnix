@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { CURRICULUM_PHASES } from '../data';
 import { CurriculumPhase } from '../types';
+import { RpoRtoBenchmarkChart } from './RpoRtoBenchmarkChart';
 
 interface AcademyWizardProps {
   currentPhaseNum: number;
@@ -135,6 +136,10 @@ export const AcademyWizard: React.FC<AcademyWizardProps> = ({
               {phase.codeSample}
             </pre>
           </div>
+
+          {currentPhaseNum === 2 && (
+            <RpoRtoBenchmarkChart compact />
+          )}
         </div>
 
         {/* Right Column: Mastery Quiz & Associated Docs */}
