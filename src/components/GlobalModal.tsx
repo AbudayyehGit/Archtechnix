@@ -12,7 +12,8 @@ import {
   Cpu, 
   Network, 
   Sparkles,
-  FileText
+  FileText,
+  ExternalLink
 } from 'lucide-react';
 import { ModalPayload } from '../types';
 
@@ -100,6 +101,24 @@ export const GlobalModal: React.FC<GlobalModalProps> = ({
         <div className="p-6 overflow-y-auto font-mono text-xs text-slate-300 leading-relaxed bg-slate-950/80 whitespace-pre-wrap select-all">
           {modal.content}
         </div>
+
+        {/* Optional Action Footer for Live Checkout */}
+        {modal.checkoutUrl && (
+          <div className="px-6 py-4 bg-slate-950 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <span className="text-xs text-slate-400 font-mono">
+              Direct checkout link generated via Stripe live API.
+            </span>
+            <a
+              href={modal.checkoutUrl}
+              target="_top"
+              rel="noopener noreferrer"
+              className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 text-white font-bold font-mono text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-orange-500/20 flex items-center justify-center space-x-2 transition-all"
+            >
+              <span>Open Stripe Checkout</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+        )}
       </div>
     </div>
   );

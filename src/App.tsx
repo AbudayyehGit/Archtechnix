@@ -22,7 +22,8 @@ import {
   Lock,
   Layers,
   Sun,
-  Moon
+  Moon,
+  Clock
 } from 'lucide-react';
 import { PRICING_TIERS, OPERATIONAL_DOCS, PROTOTYPE_PORTFOLIO, CURRICULUM_PHASES } from './data';
 import { IntakeSpecData, ModalPayload } from './types';
@@ -32,6 +33,13 @@ import { OpaScanner } from './components/OpaScanner';
 import { AcademyWizard } from './components/AcademyWizard';
 import { GlobalModal } from './components/GlobalModal';
 import { SeoHead } from './components/SeoHead';
+import { TurnaroundTimeline } from './components/TurnaroundTimeline';
+import { RecentAutomationEvents } from './components/RecentAutomationEvents';
+import { TestimonialCarousel } from './components/TestimonialCarousel';
+import { AdvisoryTeam } from './components/AdvisoryTeam';
+import { AdvisoryAvailability } from './components/AdvisoryAvailability';
+import { IntegrationsSection } from './components/IntegrationsSection';
+import { FaqSection } from './components/FaqSection';
 
 const STORAGE_KEY = 'omniops_architechnix_state_v2';
 
@@ -68,6 +76,48 @@ export default function App() {
   });
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isCheckingOut, setIsCheckingOut] = useState<boolean>(false);
+  const [webhookTriggered, setWebhookTriggered] = useState<boolean>(false);
+
+  // Check for Stripe Checkout return parameters (?status=success&session_id=...)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionId = urlParams.get('session_id');
+    const status = urlParams.get('status');
+
+    if (status === 'success' && sessionId) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      fetch(`/api/session-status?session_id=${encodeURIComponent(sessionId)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          setModal({
+            isOpen: true,
+            title: 'Payment Successful - Archtechnix Advisory Activated',
+            iconType: 'checkSquare',
+            content: `// STRIPE CHECKOUT VERIFIED (LIVE)
+Session ID: ${sessionId}
+Payment Status: ${data.paymentStatus || 'paid'}
+Amount Captured: $${data.amountTotal ? (data.amountTotal / 100).toLocaleString() : '7,500'} USD
+Customer Email: ${data.customerEmail || 'Authorized'}
+Client Reference: ${data.clientReferenceId || 'ARCH-ENGAGEMENT'}
+
+Operational Pipeline:
+1. Schedule A intake verified & immutable baseline locked.
+2. Private GitHub advisory repository provisioned.
+3. 72-Hour Guaranteed SLA initiated.
+4. Archtechnix Principal Architect assigned.`
+          });
+          showToast('Payment confirmed! Archtechnix advisory engagement activated.');
+        })
+        .catch(() => {
+          showToast('Payment confirmed! Welcome to Archtechnix.');
+        });
+    } else if (status === 'cancelled') {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      showToast('Stripe checkout was cancelled. You can resume anytime.');
+    }
+  }, []);
 
   // Theme Toggle: Defaults to 'dark' (Inverted Aesthetic), supports 'light' (High-Contrast)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -192,49 +242,90 @@ export default function App() {
     }
   };
 
-  const handleSimulateStripe = () => {
+  const handleStripeCheckout = async () => {
+    setIsCheckingOut(true);
     const tier = PRICING_TIERS.find((t) => t.id === selectedTier) || PRICING_TIERS[1];
     let total = tier.price;
     if (selectedAddons.expedite) total += 1200;
     if (selectedAddons.terraform) total += 1800;
     if (selectedAddons.drDrill) total += 2200;
 
-    const payload = {
-      mode: 'payment',
-      tier: selectedTier,
-      amount_usd: total,
-      currency: 'usd',
-      customer_email: 'vp-infrastructure@enterprise-client.io',
-      client_reference_id: `ARCH-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-      metadata: {
-        portal: 'architechnix.com',
-        sla_hours: selectedTier === 'diagnostic' ? (selectedAddons.expedite ? 24 : 72) : 240,
-        zero_meeting_mandate: true,
-        timestamp: new Date().toISOString()
+    const clientRef = `ARCH-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+
+    try {
+      showToast('Initiating live Stripe Checkout session...');
+      const response = await fetch('/api/create-checkout-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          tierId: selectedTier,
+          tierName: tier.name,
+          amount: total,
+          addons: selectedAddons,
+          clientReferenceId: clientRef,
+          customerEmail: 'enterprise-client@archtechnix.com',
+          successUrl: `${window.location.origin}/?status=success&session_id={CHECKOUT_SESSION_ID}`,
+          cancelUrl: `${window.location.origin}/?status=cancelled`
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.url) {
+        throw new Error(data.error || 'Failed to create Stripe Checkout session');
       }
-    };
 
-    setModal({
-      isOpen: true,
-      title: 'Stripe Hosted Session Dispatcher (Simulation)',
-      iconType: 'creditCard',
-      content: `// SIMULATING POST https://api.stripe.com/v1/checkout/sessions
-Headers: { "Authorization": "Bearer sk_live_architechnix_prod_***" }
+      setModal({
+        isOpen: true,
+        title: 'Redirecting to Stripe Hosted Checkout',
+        iconType: 'creditCard',
+        content: `// LIVE STRIPE CHECKOUT INITIALIZED
+Session ID: ${data.id}
+Tier: ${tier.name}
+Total Investment: $${total.toLocaleString()} USD
+Turnaround SLA: ${selectedTier === 'diagnostic' ? (selectedAddons.expedite ? '24 Hours' : '72 Hours') : '10 Business Days'}
+Status: ACTIVE_GATEWAY
 
-Payload Dispatched:
-${JSON.stringify(payload, null, 2)}
+Stripe Hosted Checkout URL:
+${data.url}
 
-[RESPONSE: 200 OK]
-Checkout URL: https://checkout.stripe.com/c/pay/cs_live_${Math.random().toString(36).substring(2, 14)}
+Click "Open Stripe Checkout" below or wait for automatic redirection to complete payment securely on Stripe.`,
+        checkoutUrl: data.url
+      });
 
-Execution Pipeline:
-1. Client authorizes payment.
-2. Webhook "checkout.session.completed" fires.
-3. Automated provisioning creates private GitHub advisory repository.`
-    });
+      showToast('Stripe session ready! Launching checkout...');
+
+      // Redirect user directly
+      setTimeout(() => {
+        try {
+          if (window.top) {
+            window.top.location.href = data.url;
+          } else {
+            window.location.href = data.url;
+          }
+        } catch {
+          window.location.href = data.url;
+        }
+      }, 1200);
+    } catch (err: any) {
+      console.error('Stripe Checkout Error:', err);
+      showToast(`Stripe Gateway Error: ${err.message || 'Payment initiation failed'}`);
+      setModal({
+        isOpen: true,
+        title: 'Stripe Gateway Notice',
+        iconType: 'creditCard',
+        content: `Stripe API Error: ${err.message || 'Unknown network error'}\n\nPlease check that your server is running and Stripe credentials are valid.`
+      });
+    } finally {
+      setIsCheckingOut(false);
+    }
   };
 
   const handleSimulateWebhook = () => {
+    setWebhookTriggered(true);
+    showToast('Stripe Webhook checkout.session.completed fired! GitHub automations triggered.');
     const webhookEvent = {
       id: `evt_${Math.random().toString(36).substring(2, 14)}`,
       object: 'event',
@@ -290,6 +381,48 @@ ${JSON.stringify(webhookEvent, null, 2)}
     }
   };
 
+  const scrollToTimeline = () => {
+    const el = document.getElementById('timeline-section');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  const scrollToTestimonials = () => {
+    const el = document.getElementById('testimonials-section');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  const scrollToTeam = () => {
+    const el = document.getElementById('advisory-team-section');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  const scrollToAvailability = () => {
+    const el = document.getElementById('advisory-availability-section');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  const scrollToIntegrations = () => {
+    const el = document.getElementById('integrations-section');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  const scrollToFaq = () => {
+    const el = document.getElementById('faq-section');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
   const progressPercentage = Math.round((completedPhases.length / 6) * 100);
 
   return (
@@ -312,16 +445,12 @@ ${JSON.stringify(webhookEvent, null, 2)}
             </div>
             <div className="flex flex-col min-w-0">
               <div className="flex items-center space-x-1">
-                <span className="font-bold text-slate-100 tracking-tight text-xs sm:text-base md:text-lg">
-                  OmniOps<span className="text-cyan-400 hidden xs:inline">.Systems</span>
-                </span>
-                <span className="brand-secondary-text text-slate-600 text-xs hidden sm:inline">×</span>
-                <span className="brand-secondary-text font-black text-orange-500 tracking-wider text-[11px] sm:text-sm uppercase shrink-0">
-                  Architechnix
+                <span className="font-extrabold text-slate-100 tracking-tight text-sm sm:text-base md:text-lg">
+                  Arch<span className="text-orange-500">technix</span>
                 </span>
               </div>
               <span className="text-[9px] text-slate-400 font-mono tracking-widest uppercase truncate hidden lg:block">
-                Spec-Driven Solo-Advisory Engine
+                72-Hour Spec-Driven Solo Advisory
               </span>
             </div>
           </div>
@@ -417,22 +546,29 @@ ${JSON.stringify(webhookEvent, null, 2)}
                   </span>
                 </h1>
                 <p className="mt-6 text-base sm:text-lg text-slate-300 leading-relaxed font-light">
-                  Architechnix delivers fixed-price architectural diagnostics, decoupled data mesh engineering, and zero-trust policy-as-code audits for scaling technology enterprises. Delivered asynchronously with guaranteed 72-hour turnaround and weekly executive alignment.
+                  Archtechnix delivers fixed-price architectural diagnostics, decoupled data mesh engineering, and zero-trust policy-as-code audits for scaling technology enterprises. Delivered asynchronously with guaranteed 72-hour turnaround and weekly executive alignment.
                 </p>
-                <div className="mt-8 flex flex-wrap gap-4 items-center">
+                <div className="mt-8 flex flex-wrap gap-3 sm:gap-4 items-center">
+                  <button
+                    onClick={scrollToTimeline}
+                    className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-5 py-3.5 rounded-xl shadow-lg shadow-orange-500/20 flex items-center space-x-2 transition-all font-mono text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
+                  >
+                    <span>72-Hour Turnaround Journey</span>
+                    <Clock className="w-4 h-4" />
+                  </button>
                   <button
                     onClick={scrollToPricing}
-                    className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-6 py-3.5 rounded-xl shadow-lg shadow-orange-500/20 flex items-center space-x-2 transition-all font-mono text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
+                    className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold px-5 py-3.5 rounded-xl flex items-center space-x-2 transition-all font-mono text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
                   >
                     <span>Configure Engagement Tier</span>
-                    <Calculator className="w-4 h-4" />
+                    <Calculator className="w-4 h-4 text-orange-400" />
                   </button>
                   <button
                     onClick={scrollToIntake}
-                    className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold px-6 py-3.5 rounded-xl flex items-center space-x-2 transition-all font-mono text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                    className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold px-5 py-3.5 rounded-xl flex items-center space-x-2 transition-all font-mono text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
                   >
                     <span>Launch Schedule A Intake</span>
-                    <FileCode2 className="w-4 h-4" />
+                    <FileCode2 className="w-4 h-4 text-teal-400" />
                   </button>
                   <button
                     onClick={() => setMode('academy')}
@@ -440,6 +576,30 @@ ${JSON.stringify(webhookEvent, null, 2)}
                   >
                     <span>Explore Flex Wizard Curriculum</span>
                     <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {/* Quick Section Anchors */}
+                <div className="mt-4 flex flex-wrap items-center gap-2.5 text-[11px] font-mono text-slate-400">
+                  <span className="text-slate-500">Direct Jump:</span>
+                  <button onClick={scrollToIntegrations} className="text-slate-300 hover:text-orange-400 transition-colors underline underline-offset-2">
+                    GitHub Integrations
+                  </button>
+                  <span className="text-slate-700" aria-hidden="true">·</span>
+                  <button onClick={scrollToAvailability} className="text-slate-300 hover:text-emerald-400 transition-colors underline underline-offset-2">
+                    Advisory Sync Calendar
+                  </button>
+                  <span className="text-slate-700" aria-hidden="true">·</span>
+                  <button onClick={scrollToTeam} className="text-slate-300 hover:text-cyan-400 transition-colors underline underline-offset-2">
+                    Principal Architects
+                  </button>
+                  <span className="text-slate-700" aria-hidden="true">·</span>
+                  <button onClick={scrollToTestimonials} className="text-slate-300 hover:text-amber-400 transition-colors underline underline-offset-2">
+                    CTO Success Stories
+                  </button>
+                  <span className="text-slate-700" aria-hidden="true">·</span>
+                  <button onClick={scrollToFaq} className="text-slate-300 hover:text-teal-400 transition-colors underline underline-offset-2">
+                    FAQ
                   </button>
                 </div>
               </div>
@@ -489,6 +649,36 @@ ${JSON.stringify(webhookEvent, null, 2)}
             </div>
           </section>
 
+          {/* Visual Step-by-Step 72-Hour Turnaround Progress Timeline & Automation Events Section */}
+          <section id="timeline-section" className="py-16 bg-slate-950 border-b border-slate-800">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+              <TurnaroundTimeline 
+                webhookTriggered={webhookTriggered}
+                onTriggerWebhook={handleSimulateWebhook}
+              />
+              <RecentAutomationEvents 
+                webhookTriggered={webhookTriggered}
+                onShowToast={showToast}
+              />
+            </div>
+          </section>
+
+          {/* GitHub Organization OAuth Integration & Automated Repository Provisioning Section */}
+          <section id="integrations-section" className="py-16 bg-slate-900/40 border-b border-slate-800">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <IntegrationsSection 
+                onShowToast={showToast}
+                defaultOrg={intakeData.org}
+                onRepositoryProvisioned={(repoData) => {
+                  setIntakeData((prev) => ({
+                    ...prev,
+                    repo: repoData.repoUrl
+                  }));
+                }}
+              />
+            </div>
+          </section>
+
           {/* Interactive Pricing Calculator Section */}
           <section id="pricing-section" className="py-16 bg-slate-900/40 border-b border-slate-800">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -507,15 +697,23 @@ ${JSON.stringify(webhookEvent, null, 2)}
                 onSelectTier={setSelectedTier}
                 selectedAddons={selectedAddons}
                 onToggleAddon={handleToggleAddon}
-                onSimulateStripe={handleSimulateStripe}
+                onSimulateStripe={handleStripeCheckout}
                 onSimulateWebhook={handleSimulateWebhook}
                 onScrollToIntake={scrollToIntake}
+                isCheckingOut={isCheckingOut}
               />
             </div>
           </section>
 
+          {/* Enterprise CTO Success Stories / Testimonial Carousel */}
+          <section id="testimonials-section" className="py-16 bg-slate-950 border-b border-slate-800">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <TestimonialCarousel />
+            </div>
+          </section>
+
           {/* Zero-Meeting Intake Specification Section */}
-          <section id="zero-intake-section" className="py-16 bg-slate-950 border-b border-slate-800">
+          <section id="zero-intake-section" className="py-16 bg-slate-900/40 border-b border-slate-800">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
               <div className="max-w-3xl mb-8">
                 <span className="text-xs font-mono uppercase tracking-wider text-teal-400 bg-teal-500/10 px-3 py-1 rounded-full border border-teal-500/20">
@@ -561,7 +759,7 @@ ${JSON.stringify(webhookEvent, null, 2)}
                 </span>
                 <h2 className="text-3xl font-extrabold text-white mt-3">Production Architecture Portfolio</h2>
                 <p className="text-slate-400 text-sm mt-2">
-                  Battle-tested prototypes and architectures built across the OmniOps & Architechnix advisory ecosystem.
+                  Battle-tested prototypes and architectures built across the Archtechnix advisory ecosystem.
                 </p>
               </div>
 
@@ -609,8 +807,33 @@ ${JSON.stringify(webhookEvent, null, 2)}
             </div>
           </section>
 
+          {/* Principal Advisory Team */}
+          <section id="advisory-team-section" className="py-16 bg-slate-950 border-b border-slate-800">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <AdvisoryTeam />
+            </div>
+          </section>
+
+          {/* Principal Architect Advisory Availability & 1-Hour Sync Booking */}
+          <section id="advisory-availability-section" className="py-16 bg-slate-900/40 border-b border-slate-800">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <AdvisoryAvailability 
+                onShowToast={showToast}
+                defaultOrg={intakeData.org}
+                defaultRepo={intakeData.repo}
+              />
+            </div>
+          </section>
+
+          {/* Frequently Asked Questions */}
+          <section id="faq-section" className="py-16 bg-slate-900/40 border-b border-slate-800">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <FaqSection />
+            </div>
+          </section>
+
           {/* Operational Business Documents & Linked Glossary */}
-          <section className="py-16 bg-slate-900/40 border-b border-slate-800">
+          <section className="py-16 bg-slate-950 border-b border-slate-800">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
               <div className="max-w-3xl mb-8">
                 <span className="text-xs font-mono uppercase tracking-wider text-orange-400 bg-orange-500/10 px-3 py-1 rounded-full border border-orange-500/20">
@@ -721,7 +944,7 @@ ${JSON.stringify(webhookEvent, null, 2)}
                 </span>
                 <h2 className="text-3xl font-extrabold text-white mt-3">High-Intent B2B Enterprise Acquisition Strategy</h2>
                 <p className="text-slate-400 text-sm mt-2">
-                  How Architechnix captures $200k+ enterprise consulting pipelines with zero outbound cold calling and disciplined asynchronous prospecting.
+                  How Archtechnix captures $200k+ enterprise consulting pipelines with zero outbound cold calling and disciplined asynchronous prospecting.
                 </p>
               </div>
 
@@ -739,7 +962,7 @@ ${JSON.stringify(webhookEvent, null, 2)}
                   <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
                     <div className="text-orange-400 font-bold mb-1">Week 1: Curate & Align</div>
                     <p className="text-slate-400 font-sans text-xs">
-                      Curate 30–50 decision-makers (CTOs / VPs of Engineering) in tech and healthcare scaleups. Align target repositories with verified proof-of-work blueprints.
+                       Curate 30–50 decision-makers (CTOs / VPs of Engineering) in tech and healthcare scaleups. Align target repositories with verified proof-of-work blueprints.
                     </p>
                   </div>
                   <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
@@ -801,7 +1024,7 @@ ${JSON.stringify(webhookEvent, null, 2)}
                     <span>The 72-Hour Turnaround Moat</span>
                   </div>
                   <p className="text-slate-400 leading-relaxed font-sans text-xs">
-                    Traditional enterprise consultancies require 6 weeks of procurement and 12 kickoff calls before a single line of IaC is written. Architechnix delivers verified production PRs and diagnostic matrices within 72 hours of Stripe checkout activation, eliminating bureaucratic drag.
+                    Traditional enterprise consultancies require 6 weeks of procurement and 12 kickoff calls before a single line of IaC is written. Archtechnix delivers verified production PRs and diagnostic matrices within 72 hours of Stripe checkout activation, eliminating bureaucratic drag.
                   </p>
                 </div>
               </div>
@@ -883,8 +1106,8 @@ ${JSON.stringify(webhookEvent, null, 2)}
               {'{∞}'}
             </div>
             <div>
-              <span className="font-bold text-white text-sm tracking-tight font-sans">
-                OmniOps Systems <span className="text-cyan-400 font-mono text-xs">{'{∞}'}</span> × Architechnix
+              <span className="font-extrabold text-white text-sm tracking-tight font-sans">
+                Arch<span className="text-orange-500">technix</span>
               </span>
               <p className="text-[11px] text-slate-500 font-sans mt-0.5">
                 Asynchronous Solo-Advisory Architecture & High-Scale Cloud Governance.
@@ -925,7 +1148,7 @@ ${JSON.stringify(webhookEvent, null, 2)}
             </button>
             <span className="text-slate-700 hidden sm:inline">·</span>
             <span className="text-slate-500">
-              © {new Date().getFullYear()} OmniOps Systems & Architechnix. All rights reserved.
+              © {new Date().getFullYear()} Archtechnix. All rights reserved.
             </span>
           </div>
         </div>

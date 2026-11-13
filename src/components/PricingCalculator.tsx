@@ -15,6 +15,7 @@ interface PricingCalculatorProps {
   onSimulateStripe: () => void;
   onSimulateWebhook: () => void;
   onScrollToIntake: () => void;
+  isCheckingOut?: boolean;
 }
 
 export const PricingCalculator: React.FC<PricingCalculatorProps> = ({
@@ -24,7 +25,8 @@ export const PricingCalculator: React.FC<PricingCalculatorProps> = ({
   onToggleAddon,
   onSimulateStripe,
   onSimulateWebhook,
-  onScrollToIntake
+  onScrollToIntake,
+  isCheckingOut = false
 }) => {
   const currentTier = PRICING_TIERS.find((t) => t.id === selectedTier) || PRICING_TIERS[1];
 
@@ -185,17 +187,20 @@ export const PricingCalculator: React.FC<PricingCalculatorProps> = ({
             </button>
             <button
               onClick={onSimulateStripe}
-              className="bg-orange-500 hover:bg-orange-600 text-white px-5 py-3 rounded-lg text-xs font-bold font-mono flex items-center space-x-2 transition-all shadow-lg"
+              disabled={isCheckingOut}
+              className={`bg-orange-500 hover:bg-orange-600 text-white px-5 py-3 rounded-lg text-xs font-bold font-mono flex items-center space-x-2 transition-all shadow-lg ${
+                isCheckingOut ? 'opacity-70 cursor-wait' : ''
+              }`}
             >
-              <CreditCard className="w-4 h-4" />
-              <span>Simulate Stripe Checkout</span>
+              <CreditCard className={`w-4 h-4 ${isCheckingOut ? 'animate-pulse' : ''}`} />
+              <span>{isCheckingOut ? 'Opening Stripe Checkout...' : 'Pay with Stripe Checkout'}</span>
             </button>
             <button
               onClick={onSimulateWebhook}
               className="bg-slate-950 hover:bg-slate-800 text-cyan-400 border border-slate-800 px-4 py-3 rounded-lg text-xs font-mono flex items-center space-x-2 transition-all"
             >
               <Webhook className="w-4 h-4" />
-              <span>Dispatch Webhook</span>
+              <span>Simulate Webhook</span>
             </button>
           </div>
         </div>

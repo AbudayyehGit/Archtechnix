@@ -166,6 +166,14 @@ html.light .text-slate-200 {
   color: #0f172a !important;
 }
 
+html.light h1:not(.bg-orange-500 *),
+html.light h2:not(.bg-orange-500 *),
+html.light h3:not(.bg-orange-500 *),
+html.light h4:not(.bg-orange-500 *),
+html.light h5:not(.bg-orange-500 *) {
+  color: #0f172a !important;
+}
+
 html.light .text-slate-300 {
   color: #334155 !important;
 }

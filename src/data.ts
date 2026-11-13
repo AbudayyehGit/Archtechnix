@@ -80,7 +80,7 @@ export const CURRICULUM_PHASES: CurriculumPhase[] = [
     tagline: 'Eliminating Discovery Meetings & Implementing Spec-Driven PR Delivery',
     reading: [
       'The traditional enterprise consulting model collapses under synchronous drag: endless exploratory Zoom discovery calls, ambiguous verbal scoping, unbilled project management overhead, and slide-deck theater that produces zero running code.',
-      'Architechnix and OmniOps replicate the Dedicated operating protocol: every engagement starts with a structured Markdown intake specification (Schedule A). The client supplies concrete infrastructure coordinates (VPC boundaries, cloud provider, KMS keys, compliance frameworks, repository mirror).',
+      'Archtechnix replicates the Dedicated operating protocol: every engagement starts with a structured Markdown intake specification (Schedule A). The client supplies concrete infrastructure coordinates (VPC boundaries, cloud provider, KMS keys, compliance frameworks, repository mirror).',
       'All deliverables exist exclusively as code Pull Requests, Architectural Decision Records (ADRs), and automated test suites. Feedback and review take place directly within GitHub or GitLab inline comments, generating an immutable, auditable paper trail.'
     ],
     keyInvariants: [
@@ -102,7 +102,7 @@ export interface ScheduleAIntakeSpec {
   immutableAuditStorage: 'AWS_S3_ObjectLock' | 'GCP_BucketLock';
 }`,
     quiz: {
-      question: 'Why does the Architechnix advisory model reject discovery Zoom calls in favor of asynchronous Schedule A specifications?',
+      question: 'Why does the Archtechnix advisory model reject discovery Zoom calls in favor of asynchronous Schedule A specifications?',
       options: [
         'Because video conferencing technology is unreliable across enterprise VPNs.',
         'Because synchronous discovery calls introduce ambiguous verbal scoping, unpaid consultative hours, and lack Git-verifiable auditability.',
@@ -334,9 +334,9 @@ async def stripe_webhook(request: Request, stripe_signature: str = Header(...)):
 {
   "@context": "https://schema.org",
   "@type": "ProfessionalService",
-  "name": "Architechnix Advisory",
+  "name": "Archtechnix Advisory",
   "description": "Zero-meeting asynchronous enterprise cloud architecture, OPA Rego policy-as-code, and data mesh audits.",
-  "url": "https://architechnix.com",
+  "url": "https://archtechnix.com",
   "priceRange": "$3500 - $7500",
   "areaServed": "Global Enterprise",
   "founder": {
@@ -371,7 +371,7 @@ export const OPERATIONAL_DOCS = {
     iconType: 'scale' as const,
     content: `# MASTER ASYNCHRONOUS SERVICES AGREEMENT (MASA)
 Effective Date: November 11, 2026
-Between: Architechnix / OmniOps Systems ("Advisor") and Enterprise Client ("Client")
+Between: Archtechnix ("Advisor") and Enterprise Client ("Client")
 
 ## 1. Operating Protocol: Asynchronous-First Delivery & Synchronized Window
 1.1 Asynchronous-First Delivery: Both parties explicitly agree that day-to-day architecture reviews, recommendations, and operational artifacts are executed asynchronously via Git Pull Requests, Markdown Specifications, and encrypted repository attachments to guarantee velocity and immutable audit trails.
@@ -423,7 +423,7 @@ Between: Architechnix / OmniOps Systems ("Advisor") and Enterprise Client ("Clie
   glossary: {
     title: 'Enterprise Architecture & Solo-Advisory Glossary',
     iconType: 'book' as const,
-    content: `# ARCHITECHNIX & OMNIOPS TECHNICAL GLOSSARY
+    content: `# ARCHTECHNIX TECHNICAL GLOSSARY
 
 * Asynchronous Advisory: Professional consulting conducted without real-time meetings or discovery calls, relying entirely on structured Markdown specs, Loom video briefs, and Git PR reviews.
 * Cryptographic Key Shredding: The intentional deletion of the Data Encryption Key (DEK) used to encrypt sensitive customer data. Without the key, ciphertext in backups is rendered irrevocably unreadable, meeting GDPR erasure requirements without expensive backup rewrites.
@@ -432,7 +432,7 @@ Between: Architechnix / OmniOps Systems ("Advisor") and Enterprise Client ("Clie
 * Master Asynchronous Services Agreement (MASA): The foundational legal contract establishing fixed pricing, PR-based delivery milestones, zero-meeting boundaries, and cryptographic data protection standards.
 * NIST SP 800-207: The canonical United States government cybersecurity standard defining Zero Trust Architecture—mandating that implicit trust based on network physical location is abolished.
 * Open Policy Agent (OPA) & Rego: An open-source, general-purpose policy engine and declarative language (Rego) that enables unified, context-aware policy enforcement across microservices, Kubernetes, and CI/CD pipelines.
-* RPO (Recovery Point Objective): The maximum acceptable age of files or data that must be recovered from backup storage for normal operations to resume if a system failure occurs. Architechnix targets sub-15 minutes.
+* RPO (Recovery Point Objective): The maximum acceptable age of files or data that must be recovered from backup storage for normal operations to resume if a system failure occurs. Archtechnix targets sub-15 minutes.
 * RTO (Recovery Time Objective): The maximum acceptable duration of time that a system can remain offline following a disaster or catastrophic outage before normal operations are restored.
 * Schedule A Specification: The structured technical intake document authored by the client outlining cloud topology, IAM boundaries, compliance targets, and repository access prior to project kickoff.`
   },
@@ -440,7 +440,7 @@ Between: Architechnix / OmniOps Systems ("Advisor") and Enterprise Client ("Clie
   standards: {
     title: 'W3C, ISO & Gold-Standard Architecture Compliance Framework',
     iconType: 'shield' as const,
-    content: `# ARCHITECHNIX ENTERPRISE COMPLIANCE & INTERNATIONAL STANDARDS CHARTER
+    content: `# ARCHTECHNIX ENTERPRISE COMPLIANCE & INTERNATIONAL STANDARDS CHARTER
 Status: ACTIVE_GOVERNANCE_SPECIFICATION
 Jurisdiction: Global Enterprise Cloud Engagements
 

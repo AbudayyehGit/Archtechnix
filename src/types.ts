@@ -66,4 +66,5 @@ export interface ModalPayload {
   title: string;
   iconType: 'scale' | 'checkSquare' | 'book' | 'creditCard' | 'webhook' | 'laptop' | 'cpu' | 'network' | 'sparkles' | 'activity' | 'shield' | 'barChart';
   content: string;
+  checkoutUrl?: string;
 }
