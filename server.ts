@@ -1,9 +1,25 @@
-import express, { Request, Response } from 'express';
-import { createServer as createViteServer } from 'vite';
+import express from 'express';
+import type { Request, Response } from 'express';
+import http from 'http';
 import dotenv from 'dotenv';
 import Stripe from 'stripe';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { optionalAuth, requireAuth, type AuthRequest } from './src/middleware/auth.ts';
+import {
+  activateClientRetainer,
+  createClientComplianceMetric,
+  getClientWorkspace,
+  getPublicCapacitySummary,
+  listAdvisoryBookings,
+  markPilotAuditPurchased,
+  saveAdvisoryBooking,
+  saveBottleneckAssessment,
+  saveClientIntakeSpec,
+  updateClientMetric,
+  upsertClientAdr,
+  upsertClientSyncAgenda,
+} from './src/db/clients.ts';
 
 dotenv.config();
 
@@ -18,8 +34,282 @@ app.use(express.json());
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 const stripe = stripeSecretKey ? new Stripe(stripeSecretKey) : null;
 
-// API endpoint to create a live Stripe Checkout Session
-app.post('/api/create-checkout-session', async (req: Request, res: Response) => {
+// Real-time capacity endpoint enforcing 4 concurrent retainer clients max
+app.get('/api/capacity', async (_req: Request, res: Response) => {
+  try {
+    const summary = await getPublicCapacitySummary();
+    return res.json(summary);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message || 'Unable to compute retainer capacity' });
+  }
+});
+
+// Public / authenticated 5-question bottleneck assessment persistence
+app.post('/api/assessments', optionalAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const {
+      sessionKey = `anon-${Date.now()}`,
+      organizationName = 'Prospective Enterprise',
+      answers = {},
+      readinessScore = 50,
+      recommendedTier = 'diagnostic',
+      criticalGaps = [],
+    } = req.body;
+
+    const record = await saveBottleneckAssessment({
+      uid: req.user?.uid,
+      email: req.user?.email,
+      sessionKey: String(sessionKey),
+      organizationName: String(organizationName),
+      answers,
+      readinessScore: Number(readinessScore),
+      recommendedTier: String(recommendedTier),
+      criticalGaps: Array.isArray(criticalGaps) ? criticalGaps.map(String) : [],
+    });
+
+    return res.json({ success: true, assessment: record });
+  } catch (error: any) {
+    console.error('Assessment save error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to save assessment' });
+  }
+});
+
+// Protected client portal workspace (Audits, Retainers, Compliance Matrix, ADRs, Sync Agendas)
+app.get('/api/workspace', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user!.uid;
+    const email = req.user!.email || 'client@enterprise.io';
+    const workspace = await getClientWorkspace(uid, email);
+    const capacity = await getPublicCapacitySummary();
+    return res.json({ success: true, ...workspace, capacity });
+  } catch (error: any) {
+    console.error('Workspace fetch error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to fetch client workspace' });
+  }
+});
+
+// Protected compliance matrix metric creation & update
+app.post('/api/compliance-metrics', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const {
+      framework = 'SOC2',
+      controlCode,
+      controlTitle,
+      category = 'Custom Remediation',
+      severity = 'high',
+      rpoRtoImpact = 'Strengthens recovery resilience',
+      remediationNote = '',
+    } = req.body;
+
+    if (!controlCode || !controlTitle) {
+      return res.status(400).json({ error: 'controlCode and controlTitle are required' });
+    }
+
+    const result = await createClientComplianceMetric(
+      req.user!.uid,
+      req.user!.email || 'client@enterprise.io',
+      {
+        framework: String(framework),
+        controlCode: String(controlCode),
+        controlTitle: String(controlTitle),
+        category: String(category),
+        severity: String(severity),
+        rpoRtoImpact: String(rpoRtoImpact),
+        remediationNote: String(remediationNote),
+      }
+    );
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error('Metric creation error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to create custom remediation control' });
+  }
+});
+
+app.patch('/api/compliance-metrics/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const metricId = Number(req.params.id);
+    if (!Number.isFinite(metricId)) {
+      return res.status(400).json({ error: 'Invalid compliance metric ID' });
+    }
+    const { isCompliant, remediationNote } = req.body;
+    const result = await updateClientMetric(req.user!.uid, metricId, {
+      isCompliant: typeof isCompliant === 'boolean' ? isCompliant : undefined,
+      remediationNote: typeof remediationNote === 'string' ? remediationNote : undefined,
+    });
+    return res.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error('Metric update error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to update compliance metric' });
+  }
+});
+
+// Protected Schedule A intake spec persistence
+app.post('/api/intake-specs', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const {
+      organizationName,
+      primaryCloud,
+      rpoTarget,
+      repoUrl,
+      complianceFlags = { gdpr: true, soc2: true, nist: false },
+      notes,
+      readinessPercent = 100,
+    } = req.body;
+
+    if (!organizationName || !repoUrl || !notes) {
+      return res.status(400).json({ error: 'organizationName, repoUrl, and notes are required' });
+    }
+
+    const spec = await saveClientIntakeSpec(
+      req.user!.uid,
+      req.user!.email || 'client@enterprise.io',
+      {
+        organizationName: String(organizationName),
+        primaryCloud: String(primaryCloud || 'AWS (EKS, Aurora, KMS)'),
+        rpoTarget: String(rpoTarget || 'Sub-15 Minute (Zero Data Loss)'),
+        repoUrl: String(repoUrl),
+        complianceFlags: {
+          gdpr: Boolean(complianceFlags.gdpr),
+          soc2: Boolean(complianceFlags.soc2),
+          nist: Boolean(complianceFlags.nist),
+        },
+        notes: String(notes),
+        readinessPercent: Number(readinessPercent),
+      }
+    );
+
+    return res.json({ success: true, intakeSpec: spec });
+  } catch (error: any) {
+    console.error('Intake spec save error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to save Schedule A intake spec' });
+  }
+});
+
+// Protected SSD / ADR / Data Flow / Risk Register endpoints
+app.post('/api/adrs', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { docType, docNumber, title, status, markdownContent } = req.body;
+    if (!title || !markdownContent) {
+      return res.status(400).json({ error: 'Title and markdownContent are required' });
+    }
+    const doc = await upsertClientAdr(req.user!.uid, {
+      docType: String(docType || 'ADR'),
+      docNumber: String(docNumber || `ADR-${Math.floor(100 + Math.random() * 899)}`),
+      title: String(title),
+      status: String(status || 'Proposed'),
+      markdownContent: String(markdownContent),
+    });
+    return res.json({ success: true, adr: doc });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message || 'Failed to create ADR document' });
+  }
+});
+
+app.patch('/api/adrs/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: 'Invalid ADR document ID' });
+    }
+    const { docType, docNumber, title, status, markdownContent } = req.body;
+    const doc = await upsertClientAdr(req.user!.uid, {
+      id,
+      docType: String(docType || 'ADR'),
+      docNumber: String(docNumber || 'ADR-001'),
+      title: String(title),
+      status: String(status || 'Accepted'),
+      markdownContent: String(markdownContent),
+    });
+    return res.json({ success: true, adr: doc });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message || 'Failed to update ADR document' });
+  }
+});
+
+// Protected Weekly Strategic Sync Agenda endpoints
+app.post('/api/sync-agendas', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const {
+      syncDate,
+      timeWindow,
+      architectName,
+      agendaTitle,
+      preReadChecklist,
+      decisionLogMarkdown,
+      loomSummaryUrl,
+    } = req.body;
+
+    if (!agendaTitle || !syncDate) {
+      return res.status(400).json({ error: 'syncDate and agendaTitle are required' });
+    }
+
+    const agenda = await upsertClientSyncAgenda(req.user!.uid, {
+      syncDate: String(syncDate),
+      timeWindow: String(timeWindow || '60 Minutes · Thursdays 14:00 UTC'),
+      architectName: String(architectName || 'Tariq Abudayyeh'),
+      agendaTitle: String(agendaTitle),
+      preReadChecklist: Array.isArray(preReadChecklist) ? preReadChecklist : [],
+      decisionLogMarkdown: String(decisionLogMarkdown || ''),
+      loomSummaryUrl: String(loomSummaryUrl || ''),
+    });
+
+    return res.json({ success: true, agenda });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message || 'Failed to save sync agenda' });
+  }
+});
+
+app.patch('/api/sync-agendas/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: 'Invalid sync agenda ID' });
+    }
+    const {
+      syncDate,
+      timeWindow,
+      architectName,
+      agendaTitle,
+      preReadChecklist,
+      decisionLogMarkdown,
+      loomSummaryUrl,
+    } = req.body;
+
+    const agenda = await upsertClientSyncAgenda(req.user!.uid, {
+      id,
+      syncDate: String(syncDate),
+      timeWindow: String(timeWindow || '60 Minutes · Thursdays 14:00 UTC'),
+      architectName: String(architectName || 'Tariq Abudayyeh'),
+      agendaTitle: String(agendaTitle),
+      preReadChecklist: Array.isArray(preReadChecklist) ? preReadChecklist : [],
+      decisionLogMarkdown: String(decisionLogMarkdown || ''),
+      loomSummaryUrl: String(loomSummaryUrl || ''),
+    });
+
+    return res.json({ success: true, agenda });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message || 'Failed to update sync agenda' });
+  }
+});
+
+// Direct authenticated retainer status activation check (validates 4-slot cap)
+app.post('/api/retainer/activate', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { stripeSessionId } = req.body || {};
+    const retainer = await activateClientRetainer(
+      req.user!.uid,
+      req.user!.email || 'client@enterprise.io',
+      stripeSessionId
+    );
+    const capacity = await getPublicCapacitySummary();
+    return res.json({ success: true, retainer, capacity });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message || 'Unable to activate retainer' });
+  }
+});
+
+// API endpoint to create a live Stripe Checkout Session (One-off Pilot Audit & Recurring Retainer)
+app.post('/api/create-checkout-session', optionalAuth, async (req: AuthRequest, res: Response) => {
   try {
     if (!stripe) {
       return res.status(500).json({
@@ -38,19 +328,32 @@ app.post('/api/create-checkout-session', async (req: Request, res: Response) => 
       clientReferenceId
     } = req.body;
 
+    const isRetainer = tierId === 'retainer';
+    if (isRetainer) {
+      const capacity = await getPublicCapacitySummary();
+      if (capacity.availableSlots <= 0) {
+        return res.status(409).json({
+          error: 'All 4 concurrent retainer slots are currently full. Initiate a $3,500 Pilot Audit to queue for the next opening.',
+          code: 'CAPACITY_CAP_REACHED'
+        });
+      }
+    }
+
     const origin = req.headers.origin || req.headers.referer || `http://localhost:${PORT}`;
     const cleanOrigin = typeof origin === 'string' ? origin.replace(/\/$/, '') : `http://localhost:${PORT}`;
 
-    // Line items creation (omits payment_method_types to leverage Stripe dynamic payment methods)
     const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [
       {
         price_data: {
           currency: 'usd',
           product_data: {
-            name: `${tierName} - Archtechnix`,
-            description: `72-Hour Guaranteed Spec-Driven Advisory. Includes complete code pull requests, architectural decision records, and zero-meeting execution.`,
+            name: `${tierName} - Archtechnix {∞}`,
+            description: isRetainer
+              ? 'Continuous fractional architecture governance, pre-commit OPA Rego compliance, RPO/RTO validation, and 1 weekly 60m strategic sync.'
+              : 'Async-by-Default Spec-Driven Architecture Audit. Delivered via Git PRs, Markdown roadmap, and Loom walkthrough.',
           },
           unit_amount: Math.round(Number(amount) * 100),
+          ...(isRetainer ? { recurring: { interval: 'month' } } : {}),
         },
         quantity: 1,
       },
@@ -58,13 +361,14 @@ app.post('/api/create-checkout-session', async (req: Request, res: Response) => 
 
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
       line_items: lineItems,
-      mode: 'payment',
+      mode: isRetainer ? 'subscription' : 'payment',
       success_url: successUrl || `${cleanOrigin}/?status=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: cancelUrl || `${cleanOrigin}/?status=cancelled`,
       client_reference_id: clientReferenceId || `ARCH-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
       metadata: {
         tierId: String(tierId),
         portal: 'archtechnix',
+        uid: req.user?.uid || '',
         expedite: String(Boolean(addons.expedite)),
         terraform: String(Boolean(addons.terraform)),
         drDrill: String(Boolean(addons.drDrill)),
@@ -72,8 +376,9 @@ app.post('/api/create-checkout-session', async (req: Request, res: Response) => 
       }
     };
 
-    if (customerEmail && typeof customerEmail === 'string' && customerEmail.includes('@')) {
-      sessionParams.customer_email = customerEmail;
+    const resolvedEmail = req.user?.email || customerEmail;
+    if (resolvedEmail && typeof resolvedEmail === 'string' && resolvedEmail.includes('@')) {
+      sessionParams.customer_email = resolvedEmail;
     }
 
     const session = await stripe.checkout.sessions.create(sessionParams);
@@ -81,6 +386,7 @@ app.post('/api/create-checkout-session', async (req: Request, res: Response) => 
     return res.json({
       url: session.url,
       id: session.id,
+      mode: sessionParams.mode,
       amountTotal: session.amount_total,
       currency: session.currency,
       status: 'success'
@@ -94,8 +400,8 @@ app.post('/api/create-checkout-session', async (req: Request, res: Response) => 
   }
 });
 
-// API endpoint to retrieve a Checkout Session status
-app.get('/api/session-status', async (req: Request, res: Response) => {
+// API endpoint to retrieve a Checkout Session status and synchronize Cloud SQL activation
+app.get('/api/session-status', optionalAuth, async (req: AuthRequest, res: Response) => {
   try {
     if (!stripe) {
       return res.status(500).json({ error: 'STRIPE_SECRET_KEY environment variable is not configured.' });
@@ -106,6 +412,22 @@ app.get('/api/session-status', async (req: Request, res: Response) => {
     }
 
     const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+    if (session.payment_status === 'paid' && req.user?.uid) {
+      const tierId = session.metadata?.tierId;
+      const email = req.user.email || session.customer_details?.email || 'client@enterprise.io';
+      if (tierId === 'retainer') {
+        await activateClientRetainer(
+          req.user.uid,
+          email,
+          session.id,
+          typeof session.subscription === 'string' ? session.subscription : undefined
+        );
+      } else {
+        await markPilotAuditPurchased(req.user.uid, email, session.id);
+      }
+    }
+
     return res.json({
       status: session.status,
       paymentStatus: session.payment_status,
@@ -150,22 +472,6 @@ let provisionedRepos: Array<{
   webhookId: string;
   initialCommitSha: string;
   timestamp: string;
-}> = [];
-
-let advisoryBookings: Array<{
-  id: string;
-  architectId: string;
-  architectName: string;
-  date: string;
-  timeSlot: string;
-  timezone: string;
-  orgName: string;
-  attendeeEmail: string;
-  topic: string;
-  notes?: string;
-  repoUrl?: string;
-  meetingUrl: string;
-  bookedAt: string;
 }> = [];
 
 // Determine base App URL from env or request headers
@@ -446,17 +752,33 @@ app.post('/api/github/provision', async (req: Request, res: Response) => {
   }
 });
 
-// 5. Advisory Availability Slots Endpoint
-app.get('/api/advisory/slots', (req: Request, res: Response) => {
+// 5. Advisory Availability Slots Endpoint (Backed by Cloud SQL)
+app.get('/api/advisory/slots', async (req: Request, res: Response) => {
   const architectId = req.query.architectId as string;
-  // Return pre-calculated available 1-hour slots for the upcoming 2 weeks
+  const persistedBookings = await listAdvisoryBookings();
+  const formattedBookings = persistedBookings.map((b) => ({
+    id: b.bookingCode,
+    architectId: b.architectId,
+    architectName: b.architectName,
+    date: b.syncDate,
+    timeSlot: b.timeSlot,
+    timezone: b.timezone,
+    orgName: b.orgName,
+    attendeeEmail: b.attendeeEmail,
+    topic: b.topic,
+    notes: b.notes,
+    repoUrl: b.repoUrl,
+    meetingUrl: b.meetingUrl,
+    bookedAt: b.bookedAt.toISOString(),
+  }));
+
   const today = new Date();
   const slots: Array<{
     id: string;
     architectId: string;
     architectName: string;
-    date: string; // YYYY-MM-DD
-    timeSlot: string; // e.g. "10:00 AM - 11:00 AM"
+    date: string;
+    timeSlot: string;
     isBooked: boolean;
     bookedBy?: string;
   }> = [];
@@ -477,7 +799,6 @@ app.get('/api/advisory/slots', (req: Request, res: Response) => {
   for (let d = 1; d <= 12; d++) {
     const slotDate = new Date(today);
     slotDate.setDate(today.getDate() + d);
-    // Skip weekends (0 is Sunday, 6 is Saturday)
     const dayOfWeek = slotDate.getDay();
     if (dayOfWeek === 0 || dayOfWeek === 6) continue;
 
@@ -488,9 +809,10 @@ app.get('/api/advisory/slots', (req: Request, res: Response) => {
 
       standardTimes.forEach((time, idx) => {
         const slotId = `${arch.id}-${dateStr}-${idx}`;
-        const existing = advisoryBookings.find((b) => b.architectId === arch.id && b.date === dateStr && b.timeSlot === time);
+        const existing = formattedBookings.find(
+          (b) => b.architectId === arch.id && b.date === dateStr && b.timeSlot === time
+        );
 
-        // Pre-reserve a couple of realistic slots for social proof
         const isPreReserved = (d === 1 && idx === 1) || (d === 3 && idx === 2);
 
         slots.push({
@@ -509,13 +831,13 @@ app.get('/api/advisory/slots', (req: Request, res: Response) => {
   res.json({
     success: true,
     slots,
-    totalBookings: advisoryBookings.length,
-    bookings: advisoryBookings
+    totalBookings: formattedBookings.length,
+    bookings: formattedBookings
   });
 });
 
-// 6. Advisory 1-Hour Sync Booking Endpoint
-app.post('/api/advisory/book', (req: Request, res: Response) => {
+// 6. Advisory 1-Hour Sync Booking Endpoint (Enforces sign-in for Cloud SQL persistence)
+app.post('/api/advisory/book', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const {
       architectId = 'tariq-abudayyeh',
@@ -534,36 +856,50 @@ app.post('/api/advisory/book', (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Date and time slot are required for booking.' });
     }
 
-    const bookingId = `sync_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    const bookingCode = `sync_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
     const meetingCode = `arc-${Math.random().toString(36).substring(2, 5)}-${Math.random().toString(36).substring(2, 5)}`;
     const meetingUrl = `https://meet.google.com/${meetingCode}`;
 
-    const newBooking = {
-      id: bookingId,
+    const saved = await saveAdvisoryBooking({
+      uid: req.user!.uid,
+      email: req.user!.email || 'client@enterprise.io',
+      bookingCode,
       architectId: String(architectId),
       architectName: String(architectName),
-      date: String(date),
+      syncDate: String(date),
       timeSlot: String(timeSlot),
       timezone: String(timezone),
       orgName: String(orgName),
-      attendeeEmail: String(attendeeEmail || 'client@enterprise.io'),
+      attendeeEmail: String(attendeeEmail || req.user!.email || 'client@enterprise.io'),
       topic: String(topic),
       notes: String(notes),
       repoUrl: String(repoUrl),
       meetingUrl,
-      bookedAt: new Date().toISOString()
+    });
+
+    const newBooking = {
+      id: saved.bookingCode,
+      architectId: saved.architectId,
+      architectName: saved.architectName,
+      date: saved.syncDate,
+      timeSlot: saved.timeSlot,
+      timezone: saved.timezone,
+      orgName: saved.orgName,
+      attendeeEmail: saved.attendeeEmail,
+      topic: saved.topic,
+      notes: saved.notes,
+      repoUrl: saved.repoUrl,
+      meetingUrl: saved.meetingUrl,
+      bookedAt: saved.bookedAt.toISOString(),
     };
 
-    advisoryBookings.unshift(newBooking);
-
-    // Generate basic iCalendar ICS payload
     const icsContent = `BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//Archtechnix//Advisory Sync//EN
 CALSCALE:GREGORIAN
 METHOD:REQUEST
 BEGIN:VEVENT
-UID:${bookingId}@archtechnix.com
+UID:${bookingCode}@archtechnix.com
 DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z
 SUMMARY:Archtechnix Advisory 1-Hour Sync: ${topic}
 DESCRIPTION:Principal Architect: ${architectName}\\nOrganization: ${orgName}\\nAgenda: ${topic}\\nMeeting Link: ${meetingUrl}\\nRepository: ${repoUrl}
@@ -576,7 +912,7 @@ END:VCALENDAR`;
       success: true,
       booking: newBooking,
       icsContent,
-      message: `1-Hour Advisory Sync confirmed with ${architectName} for ${date} at ${timeSlot} (${timezone})`
+      message: `1-Hour Advisory Sync persisted for ${date} at ${timeSlot} (${timezone})`
     });
   } catch (error: any) {
     console.error('Booking error:', error);
@@ -595,20 +931,28 @@ app.get('/api/health', (_req: Request, res: Response) => {
 });
 
 async function main() {
+  const httpServer = http.createServer(app);
+
   if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.resolve(__dirname, 'dist')));
     app.get('*', (_req, res) => {
       res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
     });
   } else {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: {
+          server: httpServer,
+        },
+      },
       appType: 'spa'
     });
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Archtechnix server running on http://0.0.0.0:${PORT}`);
   });
 }

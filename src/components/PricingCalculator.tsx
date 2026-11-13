@@ -1,7 +1,7 @@
 import React from 'react';
 import { Check, Sliders, CreditCard, Webhook, ArrowRight } from 'lucide-react';
 import { PRICING_TIERS, SCOPE_ADDONS } from '../data';
-import { PricingTier } from '../types';
+import type { CapacitySummary } from '../contexts/AuthContext';
 
 interface PricingCalculatorProps {
   selectedTier: string;
@@ -16,6 +16,7 @@ interface PricingCalculatorProps {
   onSimulateWebhook: () => void;
   onScrollToIntake: () => void;
   isCheckingOut?: boolean;
+  capacity?: CapacitySummary;
 }
 
 export const PricingCalculator: React.FC<PricingCalculatorProps> = ({
@@ -26,7 +27,8 @@ export const PricingCalculator: React.FC<PricingCalculatorProps> = ({
   onSimulateStripe,
   onSimulateWebhook,
   onScrollToIntake,
-  isCheckingOut = false
+  isCheckingOut = false,
+  capacity
 }) => {
   const currentTier = PRICING_TIERS.find((t) => t.id === selectedTier) || PRICING_TIERS[1];
 
@@ -34,6 +36,8 @@ export const PricingCalculator: React.FC<PricingCalculatorProps> = ({
   if (selectedAddons.expedite) totalPrice += 1200;
   if (selectedAddons.terraform) totalPrice += 1800;
   if (selectedAddons.drDrill) totalPrice += 2200;
+
+  const capacityLabel = capacity?.label || 'Active Retainer Slots: 1 / 4 Available';
 
   return (
     <div className="space-y-8">
@@ -44,26 +48,26 @@ export const PricingCalculator: React.FC<PricingCalculatorProps> = ({
             {'{∞}'}
           </div>
           <div>
-            <div className="flex items-center space-x-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-mono font-bold text-white uppercase tracking-wider">
                 Operational Capacity Constraint
               </span>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                Active Slot Status: 2 / 4 Filled
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 tabular-nums">
+                {capacityLabel}
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Strictly capped at 4 monthly retainer clients to guarantee a focused 20–25 hour advisory work week.
+              Strictly capped at 4 concurrent monthly retainer clients to guarantee focused 20–25 hour deep engineering delivery.
             </p>
           </div>
         </div>
 
         {/* Financial Range Pill */}
         <div className="flex items-center space-x-3 text-xs font-mono bg-slate-950 px-3.5 py-2 rounded-xl border border-slate-800 self-stretch sm:self-auto justify-between sm:justify-start">
-          <span className="text-slate-500">Revenue Band:</span>
-          <span className="text-slate-400">$0 <span className="text-slate-600">→</span></span>
-          <span className="text-cyan-400 font-bold">$15,000 <span className="text-slate-500 text-[10px]">(Mid)</span> <span className="text-slate-600">→</span></span>
-          <span className="text-orange-400 font-bold">$30,000/mo <span className="text-slate-500 text-[10px]">(Max)</span></span>
+          <span className="text-slate-500">Engagement Tiers:</span>
+          <span className="text-cyan-400 font-bold">$3,500 <span className="text-slate-500 text-[10px]">(Pilot)</span></span>
+          <span className="text-slate-600">→</span>
+          <span className="text-orange-400 font-bold">$7,500/mo <span className="text-slate-500 text-[10px]">(Retainer)</span></span>
         </div>
       </div>
 

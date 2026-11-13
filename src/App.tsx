@@ -19,11 +19,9 @@ import {
   FileCode2, 
   ArrowRight,
   CheckCircle2,
-  Lock,
-  Layers,
   Sun,
   Moon,
-  Clock
+  Calendar
 } from 'lucide-react';
 import { PRICING_TIERS, OPERATIONAL_DOCS, PROTOTYPE_PORTFOLIO, CURRICULUM_PHASES } from './data';
 import { IntakeSpecData, ModalPayload } from './types';
@@ -41,11 +39,22 @@ import { AdvisoryAvailability } from './components/AdvisoryAvailability';
 import { IntegrationsSection } from './components/IntegrationsSection';
 import { FaqSection } from './components/FaqSection';
 import { RpoRtoBenchmarkChart } from './components/RpoRtoBenchmarkChart';
+import { BottleneckAssessment } from './components/BottleneckAssessment';
+import { PilotAuditDashboard } from './components/PilotAuditDashboard';
+import { RetainerGovernanceHub } from './components/RetainerGovernanceHub';
+import { PWAInstallButton } from './components/PWAInstallButton';
+import { OfflineIndicator } from './components/OfflineIndicator';
+import { useAuth } from './contexts/AuthContext';
+import { offlineDb } from './lib/offlineDb';
 
 const STORAGE_KEY = 'omniops_architechnix_state_v2';
 
+type PortalTab = 'funnel' | 'audit' | 'retainer';
+
 export default function App() {
+  const { user, idToken, capacity, refreshWorkspace, refreshCapacity } = useAuth();
   const [mode, setMode] = useState<'business' | 'academy'>('business');
+  const [portalTab, setPortalTab] = useState<PortalTab>('funnel');
   const [currentPhase, setCurrentPhase] = useState<number>(1);
   const [completedPhases, setCompletedPhases] = useState<number[]>([]);
   const [quizAnswers, setQuizAnswers] = useState<Record<number, number>>({});
@@ -89,24 +98,28 @@ export default function App() {
 
     if (status === 'success' && sessionId) {
       window.history.replaceState({}, document.title, window.location.pathname);
-      fetch(`/api/session-status?session_id=${encodeURIComponent(sessionId)}`)
+      fetch(`/api/session-status?session_id=${encodeURIComponent(sessionId)}`, {
+        headers: idToken ? { Authorization: `Bearer ${idToken}` } : {},
+      })
         .then((res) => res.json())
         .then((data) => {
+          refreshCapacity();
+          if (idToken) refreshWorkspace();
           setModal({
             isOpen: true,
             title: 'Payment Successful - Archtechnix Advisory Activated',
             iconType: 'checkSquare',
-            content: `// STRIPE CHECKOUT VERIFIED (LIVE)
+            content: `STRIPE CHECKOUT VERIFIED (LIVE)
 Session ID: ${sessionId}
 Payment Status: ${data.paymentStatus || 'paid'}
-Amount Captured: $${data.amountTotal ? (data.amountTotal / 100).toLocaleString() : '7,500'} USD
+Amount Captured: $${data.amountTotal ? (data.amountTotal / 100).toLocaleString() : '3,500'} USD
 Customer Email: ${data.customerEmail || 'Authorized'}
 Client Reference: ${data.clientReferenceId || 'ARCH-ENGAGEMENT'}
 
 Operational Pipeline:
 1. Schedule A intake verified & immutable baseline locked.
 2. Private GitHub advisory repository provisioned.
-3. 72-Hour Guaranteed SLA initiated.
+3. Async-by-Default + Weekly Strategic Sync cadence activated.
 4. Archtechnix Principal Architect assigned.`
           });
           showToast('Payment confirmed! Archtechnix advisory engagement activated.');
@@ -118,7 +131,7 @@ Operational Pipeline:
       window.history.replaceState({}, document.title, window.location.pathname);
       showToast('Stripe checkout was cancelled. You can resume anytime.');
     }
-  }, []);
+  }, [idToken, refreshCapacity, refreshWorkspace]);
 
   // Theme Toggle: Defaults to 'dark' (Inverted Aesthetic), supports 'light' (High-Contrast)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -154,6 +167,9 @@ Operational Pipeline:
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed.mode) setMode(parsed.mode);
+        if (parsed.portalTab === 'funnel' || parsed.portalTab === 'audit' || parsed.portalTab === 'retainer') {
+          setPortalTab(parsed.portalTab);
+        }
         if (parsed.currentPhase) setCurrentPhase(parsed.currentPhase);
         if (parsed.completedPhases) setCompletedPhases(parsed.completedPhases);
         if (parsed.quizAnswers) setQuizAnswers(parsed.quizAnswers);
@@ -161,6 +177,12 @@ Operational Pipeline:
         if (parsed.selectedAddons) setSelectedAddons(parsed.selectedAddons);
         if (parsed.intakeData) setIntakeData(parsed.intakeData);
       }
+      offlineDb.intakeDrafts
+        .get('active-schedule-a')
+        .then((rec) => {
+          if (rec?.data) setIntakeData(rec.data);
+        })
+        .catch(() => {});
     } catch (e) {
       console.warn('LocalStorage error', e);
     }
@@ -171,6 +193,7 @@ Operational Pipeline:
     try {
       const payload = {
         mode,
+        portalTab,
         currentPhase,
         completedPhases,
         quizAnswers,
@@ -182,7 +205,7 @@ Operational Pipeline:
     } catch (e) {
       console.warn('LocalStorage save error', e);
     }
-  }, [mode, currentPhase, completedPhases, quizAnswers, selectedTier, selectedAddons, intakeData]);
+  }, [mode, portalTab, currentPhase, completedPhases, quizAnswers, selectedTier, selectedAddons, intakeData]);
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -243,30 +266,34 @@ Operational Pipeline:
     }
   };
 
-  const handleStripeCheckout = async () => {
+  const handleStripeCheckout = async (tierOverride?: 'diagnostic' | 'audit' | 'retainer') => {
     setIsCheckingOut(true);
-    const tier = PRICING_TIERS.find((t) => t.id === selectedTier) || PRICING_TIERS[1];
+    const activeTierId = tierOverride || selectedTier;
+    const tier = PRICING_TIERS.find((t) => t.id === activeTierId) || PRICING_TIERS[1];
     let total = tier.price;
-    if (selectedAddons.expedite) total += 1200;
-    if (selectedAddons.terraform) total += 1800;
-    if (selectedAddons.drDrill) total += 2200;
+    if (!tierOverride) {
+      if (selectedAddons.expedite) total += 1200;
+      if (selectedAddons.terraform) total += 1800;
+      if (selectedAddons.drDrill) total += 2200;
+    }
 
     const clientRef = `ARCH-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
     try {
-      showToast('Initiating live Stripe Checkout session...');
+      showToast(`Initiating live Stripe Checkout for ${tier.name}...`);
       const response = await fetch('/api/create-checkout-session', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
         },
         body: JSON.stringify({
-          tierId: selectedTier,
+          tierId: activeTierId,
           tierName: tier.name,
           amount: total,
-          addons: selectedAddons,
+          addons: tierOverride ? {} : selectedAddons,
           clientReferenceId: clientRef,
-          customerEmail: 'enterprise-client@archtechnix.com',
+          customerEmail: user?.email || 'enterprise-client@archtechnix.com',
           successUrl: `${window.location.origin}/?status=success&session_id={CHECKOUT_SESSION_ID}`,
           cancelUrl: `${window.location.origin}/?status=cancelled`
         }),
@@ -282,11 +309,12 @@ Operational Pipeline:
         isOpen: true,
         title: 'Redirecting to Stripe Hosted Checkout',
         iconType: 'creditCard',
-        content: `// LIVE STRIPE CHECKOUT INITIALIZED
+        content: `LIVE STRIPE CHECKOUT INITIALIZED
 Session ID: ${data.id}
 Tier: ${tier.name}
+Billing Mode: ${activeTierId === 'retainer' ? 'Recurring Monthly Subscription ($7,500/mo)' : 'Fixed-Fee Audit'}
 Total Investment: $${total.toLocaleString()} USD
-Turnaround SLA: ${selectedTier === 'diagnostic' ? (selectedAddons.expedite ? '24 Hours' : '72 Hours') : '10 Business Days'}
+Turnaround SLA: ${activeTierId === 'diagnostic' ? '14-Day Async Sprint' : activeTierId === 'retainer' ? 'Continuous Async + Weekly 60m Sync' : '10 Business Days'}
 Status: ACTIVE_GATEWAY
 
 Stripe Hosted Checkout URL:
@@ -298,7 +326,6 @@ Click "Open Stripe Checkout" below or wait for automatic redirection to complete
 
       showToast('Stripe session ready! Launching checkout...');
 
-      // Redirect user directly
       setTimeout(() => {
         try {
           if (window.top) {
@@ -368,67 +395,25 @@ ${JSON.stringify(webhookEvent, null, 2)}
     });
   };
 
+  const navigateToModule = (tab: PortalTab, sectionId?: string) => {
+    setMode('business');
+    setPortalTab(tab);
+    if (sectionId) {
+      setTimeout(() => {
+        const el = document.getElementById(sectionId);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth' });
+        } else {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      }, 60);
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
   const scrollToIntake = () => {
-    const el = document.getElementById('zero-intake-section');
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
-  const scrollToPricing = () => {
-    const el = document.getElementById('pricing-section');
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
-  const scrollToTimeline = () => {
-    const el = document.getElementById('timeline-section');
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
-  const scrollToTestimonials = () => {
-    const el = document.getElementById('testimonials-section');
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
-  const scrollToTeam = () => {
-    const el = document.getElementById('advisory-team-section');
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
-  const scrollToAvailability = () => {
-    const el = document.getElementById('advisory-availability-section');
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
-  const scrollToIntegrations = () => {
-    const el = document.getElementById('integrations-section');
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
-  const scrollToFaq = () => {
-    const el = document.getElementById('faq-section');
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
-  const scrollToRpoRto = () => {
-    const el = document.getElementById('rpo-rto-section');
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
-    }
+    navigateToModule('funnel', 'zero-intake-section');
   };
 
   const progressPercentage = Math.round((completedPhases.length / 6) * 100);
@@ -491,13 +476,16 @@ ${JSON.stringify(webhookEvent, null, 2)}
             </nav>
           </div>
 
-          {/* Right Action Zone: Quick Metrics, Theme Toggle, & Reset */}
-          <div className="flex items-center space-x-1.5 sm:space-x-3 shrink-0">
-            <div className="hidden md:flex items-center space-x-2 text-[11px] font-mono bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-800">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span className="text-slate-400">Async:</span>
-              <span className="text-emerald-400 font-bold">100%</span>
+          {/* Right Action Zone: Retainer Capacity Counter, PWA Install, Theme Toggle, & Reset */}
+          <div className="flex items-center space-x-1.5 sm:space-x-2.5 shrink-0">
+            <div className="hidden md:flex items-center space-x-2 text-[11px] font-mono bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800 tabular-nums">
+              <span className="text-slate-400">Retainer Slots:</span>
+              <span className="text-emerald-400 font-bold">
+                {capacity.availableSlots} / {capacity.maxSlots} Open
+              </span>
             </div>
+
+            <PWAInstallButton />
 
             {/* High-Contrast / Inverted Theme Toggle Button */}
             <button
@@ -536,323 +524,445 @@ ${JSON.stringify(webhookEvent, null, 2)}
       {/* ========================================================================= */}
       {mode === 'business' && (
         <main className="flex-1 animate-in fade-in duration-300">
-          {/* Hero Section */}
-          <section className="relative overflow-hidden py-16 lg:py-24 border-b border-slate-800/80 bg-gradient-to-b from-slate-950 via-slate-900/40 to-slate-950">
-            <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b08_1px,transparent_1px),linear-gradient(to_bottom,#1e293b08_1px,transparent_1px)] bg-[size:4rem_4rem]"></div>
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
-              <div className="max-w-3xl">
-                {/* Hero Upper Kicker Pill */}
-                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-orange-500/10 border border-orange-500/30 text-orange-400 text-xs font-mono mb-6 max-w-full">
-                  <span className="w-2 h-2 rounded-full bg-orange-500 shrink-0"></span>
-                  <span className="truncate sm:hidden">Async Advisory · Dedicated-Grade Spec Delivery</span>
-                  <span className="hidden sm:inline">Zero-Meeting Advisory Architecture · Dedicated-Grade Spec Delivery</span>
-                </div>
-                <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold text-white tracking-tight leading-tight">
-                  Stop scheduling discovery calls.<br />
-                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 via-amber-400 to-amber-200">
-                    Deploy verified cloud architectures on spec.
-                  </span>
-                </h1>
-                <p className="mt-6 text-base sm:text-lg text-slate-300 leading-relaxed font-light">
-                  Archtechnix delivers fixed-price architectural diagnostics, decoupled data mesh engineering, and zero-trust policy-as-code audits for scaling technology enterprises. Delivered asynchronously with guaranteed 72-hour turnaround and weekly executive alignment.
-                </p>
-                <div className="mt-8 flex flex-wrap gap-3 sm:gap-4 items-center">
-                  <button
-                    onClick={scrollToTimeline}
-                    className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-5 py-3.5 rounded-xl shadow-lg shadow-orange-500/20 flex items-center space-x-2 transition-all font-mono text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
-                  >
-                    <span>72-Hour Turnaround Journey</span>
-                    <Clock className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={scrollToPricing}
-                    className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold px-5 py-3.5 rounded-xl flex items-center space-x-2 transition-all font-mono text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
-                  >
-                    <span>Configure Engagement Tier</span>
-                    <Calculator className="w-4 h-4 text-orange-400" />
-                  </button>
-                  <button
-                    onClick={scrollToIntake}
-                    className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold px-5 py-3.5 rounded-xl flex items-center space-x-2 transition-all font-mono text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
-                  >
-                    <span>Launch Schedule A Intake</span>
-                    <FileCode2 className="w-4 h-4 text-teal-400" />
-                  </button>
-                  <button
-                    onClick={() => setMode('academy')}
-                    className="text-slate-400 hover:text-cyan-400 text-xs font-mono flex items-center space-x-1.5 underline underline-offset-4 ml-2 transition-colors"
-                  >
-                    <span>Explore Flex Wizard Curriculum</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {/* Quick Section Anchors */}
-                <div className="mt-4 flex flex-wrap items-center gap-2.5 text-[11px] font-mono text-slate-400">
-                  <span className="text-slate-500">Direct Jump:</span>
-                  <button onClick={scrollToIntegrations} className="text-slate-300 hover:text-orange-400 transition-colors underline underline-offset-2">
-                    GitHub Integrations
-                  </button>
-                  <span className="text-slate-700" aria-hidden="true">·</span>
-                  <button onClick={scrollToAvailability} className="text-slate-300 hover:text-emerald-400 transition-colors underline underline-offset-2">
-                    Advisory Sync Calendar
-                  </button>
-                  <span className="text-slate-700" aria-hidden="true">·</span>
-                  <button onClick={scrollToTeam} className="text-slate-300 hover:text-cyan-400 transition-colors underline underline-offset-2">
-                    Principal Architects
-                  </button>
-                  <span className="text-slate-700" aria-hidden="true">·</span>
-                  <button onClick={scrollToTestimonials} className="text-slate-300 hover:text-amber-400 transition-colors underline underline-offset-2">
-                    CTO Success Stories
-                  </button>
-                  <span className="text-slate-700" aria-hidden="true">·</span>
-                  <button onClick={scrollToRpoRto} className="text-slate-300 hover:text-cyan-400 transition-colors underline underline-offset-2">
-                    Sub-15m RPO/RTO Benchmarks
-                  </button>
-                  <span className="text-slate-700" aria-hidden="true">·</span>
-                  <button onClick={scrollToFaq} className="text-slate-300 hover:text-teal-400 transition-colors underline underline-offset-2">
-                    FAQ
-                  </button>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* Operational Highlights / Dedicated Workflow Comparison */}
-          <section className="py-12 bg-slate-950 border-b border-slate-800">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <h2 className="text-xs font-mono uppercase tracking-widest text-slate-400 mb-6 flex items-center space-x-2">
-                <ShieldCheck className="w-4 h-4 text-teal-400" />
-                <span>The Asynchronous-First Operating Model with Weekly Sync Window</span>
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 hover:border-teal-500/40 transition-colors">
-                  <div className="text-teal-400 mb-3"><Ban className="w-6 h-6" /></div>
-                  <h3 className="font-bold text-white text-base">Async-First + 1hr Weekly Sync</h3>
-                  <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                    Zero discovery call fatigue. Day-to-day work is spec-driven, with up to 1 full hour of weekly synchronized Teams/phone communication available at client request.
-                  </p>
-                </div>
-
-                <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 hover:border-cyan-500/40 transition-colors">
-                  <div className="text-cyan-400 mb-3"><Database className="w-6 h-6" /></div>
-                  <h3 className="font-bold text-white text-base">Decoupled Data Mesh</h3>
-                  <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                    Domain-driven federated data architectures with sub-15 minute RPO/RTO target disaster recovery blueprints.
-                  </p>
-                </div>
-
-                <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 hover:border-violet-500/40 transition-colors">
-                  <div className="text-violet-400 mb-3"><Key className="w-6 h-6" /></div>
-                  <h3 className="font-bold text-white text-base">Key Shredding & OPA</h3>
-                  <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                    Policy-as-code automation and cryptographic key shredding protocols for GDPR/CCPA & zero-trust compliance.
-                  </p>
-                </div>
-
-                <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 hover:border-orange-500/40 transition-colors">
-                  <div className="text-orange-400 mb-3"><Terminal className="w-6 h-6" /></div>
-                  <h3 className="font-bold text-white text-base">Git-Driven Artifacts</h3>
-                  <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                    Final artifacts delivered strictly as PRs, Terraform modules, Open Policy Agent bundles, and architecture diagrams.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* Visual Step-by-Step 72-Hour Turnaround Progress Timeline & Automation Events Section */}
-          <section id="timeline-section" className="py-16 bg-slate-950 border-b border-slate-800">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
-              <TurnaroundTimeline 
-                webhookTriggered={webhookTriggered}
-                onTriggerWebhook={handleSimulateWebhook}
-              />
-              <RecentAutomationEvents 
-                webhookTriggered={webhookTriggered}
-                onShowToast={showToast}
-              />
-            </div>
-          </section>
-
-          {/* GitHub Organization OAuth Integration & Automated Repository Provisioning Section */}
-          <section id="integrations-section" className="py-16 bg-slate-900/40 border-b border-slate-800">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <IntegrationsSection 
-                onShowToast={showToast}
-                defaultOrg={intakeData.org}
-                onRepositoryProvisioned={(repoData) => {
-                  setIntakeData((prev) => ({
-                    ...prev,
-                    repo: repoData.repoUrl
-                  }));
-                }}
-              />
-            </div>
-          </section>
-
-          {/* Interactive Pricing Calculator Section */}
-          <section id="pricing-section" className="py-16 bg-slate-900/40 border-b border-slate-800">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="text-center max-w-2xl mx-auto mb-12">
-                <span className="text-xs font-mono uppercase tracking-wider text-orange-400 bg-orange-500/10 px-3 py-1 rounded-full border border-orange-500/20">
-                  Transparent Procurement
-                </span>
-                <h2 className="text-3xl font-extrabold text-white mt-3">Productized Advisory Tier Calculator</h2>
-                <p className="text-slate-400 text-sm mt-2">
-                  Select your scope and immediately simulate procurement, invoice generation, or automated Stripe webhook checkout.
-                </p>
+          {/* Sticky Portal Workspace Tab Strip */}
+          <div className="sticky top-16 z-30 bg-slate-950/95 backdrop-blur-md border-b border-slate-800/80">
+            <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 flex flex-wrap items-center justify-between gap-3">
+              <div role="tablist" aria-label="Portal Workspace Views" className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap">
+                <button
+                  role="tab"
+                  aria-selected={portalTab === 'funnel'}
+                  onClick={() => navigateToModule('funnel')}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-mono font-semibold flex items-center space-x-2 transition-all border ${
+                    portalTab === 'funnel'
+                      ? 'bg-orange-500/15 text-orange-400 border-orange-500/40'
+                      : 'bg-slate-900/70 text-slate-400 border-slate-800 hover:text-white hover:border-slate-700'
+                  }`}
+                >
+                  <Calculator className="w-3.5 h-3.5 shrink-0" />
+                  <span>Conversion & Intake</span>
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={portalTab === 'audit'}
+                  onClick={() => navigateToModule('audit')}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-mono font-semibold flex items-center space-x-2 transition-all border ${
+                    portalTab === 'audit'
+                      ? 'bg-teal-500/15 text-teal-400 border-teal-500/40'
+                      : 'bg-slate-900/70 text-slate-400 border-slate-800 hover:text-white hover:border-slate-700'
+                  }`}
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                  <span>Pilot Audit Portal</span>
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={portalTab === 'retainer'}
+                  onClick={() => navigateToModule('retainer')}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-mono font-semibold flex items-center space-x-2 transition-all border ${
+                    portalTab === 'retainer'
+                      ? 'bg-violet-500/15 text-violet-400 border-violet-500/40'
+                      : 'bg-slate-900/70 text-slate-400 border-slate-800 hover:text-white hover:border-slate-700'
+                  }`}
+                >
+                  <FileCode2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>Retainer Governance Hub</span>
+                </button>
               </div>
 
-              <PricingCalculator
-                selectedTier={selectedTier}
-                onSelectTier={setSelectedTier}
-                selectedAddons={selectedAddons}
-                onToggleAddon={handleToggleAddon}
-                onSimulateStripe={handleStripeCheckout}
-                onSimulateWebhook={handleSimulateWebhook}
-                onScrollToIntake={scrollToIntake}
-                isCheckingOut={isCheckingOut}
-              />
-            </div>
-          </section>
-
-          {/* Enterprise CTO Success Stories / Testimonial Carousel */}
-          <section id="testimonials-section" className="py-16 bg-slate-950 border-b border-slate-800">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <TestimonialCarousel />
-            </div>
-          </section>
-
-          {/* Zero-Meeting Intake Specification Section */}
-          <section id="zero-intake-section" className="py-16 bg-slate-900/40 border-b border-slate-800">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="max-w-3xl mb-8">
-                <span className="text-xs font-mono uppercase tracking-wider text-teal-400 bg-teal-500/10 px-3 py-1 rounded-full border border-teal-500/20">
-                  Protocol Intake Engine
-                </span>
-                <h2 className="text-3xl font-extrabold text-white mt-3">Schedule A: Zero-Meeting Intake Specification</h2>
-                <p className="text-slate-400 text-sm mt-2">
-                  Dedicated workflow replication. Fill in infrastructure coordinates. All data is autosaved locally in your browser.
-                </p>
+              <div className="hidden lg:flex items-center space-x-3 text-[11px] font-mono text-slate-400">
+                <span>Model: <strong className="text-slate-200">Async-by-Default + 1 Weekly Sync</strong></span>
+                <span className="text-slate-700">|</span>
+                <button
+                  onClick={() => navigateToModule('retainer', 'advisory-availability-section')}
+                  className="text-emerald-400 hover:text-emerald-300 flex items-center space-x-1 transition-colors"
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  <span>Book 1-Hr Sync</span>
+                </button>
               </div>
-
-              <IntakeGenerator
-                intakeData={intakeData}
-                onUpdate={setIntakeData}
-                onShowToast={showToast}
-              />
             </div>
-          </section>
+          </div>
 
-          {/* Live OPA Rego Scanner Section */}
-          <section className="py-16 bg-slate-900/30 border-b border-slate-800">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="max-w-3xl mb-8">
-                <span className="text-xs font-mono uppercase tracking-wider text-cyan-400 bg-cyan-500/10 px-3 py-1 rounded-full border border-cyan-500/20">
-                  Interactive Compliance Sandbox
-                </span>
-                <h2 className="text-3xl font-extrabold text-white mt-3">Live Policy-as-Code (OPA Rego) Scanner</h2>
-                <p className="text-slate-400 text-sm mt-2">
-                  Test production security rules against cloud infrastructure states in real time. Validate compliance before merging PRs.
-                </p>
-              </div>
-
-              <OpaScanner />
-            </div>
-          </section>
-
-          {/* Sub-15m RPO/RTO Disaster Recovery Benchmark Visualization */}
-          <section id="rpo-rto-section" className="py-16 bg-slate-900/40 border-b border-slate-800">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <RpoRtoBenchmarkChart />
-            </div>
-          </section>
-
-          {/* Applied Engineering & Portfolio Hub */}
-          <section className="py-16 bg-slate-950 border-b border-slate-800">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="max-w-3xl mb-12">
-                <span className="text-xs font-mono uppercase tracking-wider text-violet-400 bg-violet-500/10 px-3 py-1 rounded-full border border-violet-500/20">
-                  Applied Engineering Proof of Work
-                </span>
-                <h2 className="text-3xl font-extrabold text-white mt-3">Production Architecture Portfolio</h2>
-                <p className="text-slate-400 text-sm mt-2">
-                  Battle-tested prototypes and architectures built across the Archtechnix advisory ecosystem.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {PROTOTYPE_PORTFOLIO.map((proto) => (
-                  <div
-                    key={proto.id}
-                    className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 hover:border-slate-700 transition-all flex flex-col justify-between"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-[11px] font-mono text-cyan-400 bg-cyan-500/10 px-2.5 py-0.5 rounded-md border border-cyan-500/20">
-                          {proto.badge}
-                        </span>
-                        <span className="text-xs font-mono text-emerald-400 flex items-center space-x-1">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>{proto.statusMetric}</span>
-                        </span>
-                      </div>
-                      <h3 className="text-lg font-bold text-white">{proto.title}</h3>
-                      <p className="text-xs text-slate-400 mt-2 leading-relaxed">{proto.description}</p>
-
-                      <div className="mt-4 flex flex-wrap gap-2 text-[10px] font-mono">
-                        {proto.techStack.map((tech: string, i: number) => (
-                          <span key={i} className="px-2 py-0.5 bg-slate-950 text-slate-300 rounded border border-slate-800">
-                            {tech}
-                          </span>
-                        ))}
-                      </div>
+          {portalTab === 'funnel' && (
+            <>
+              {/* Hero Section */}
+              <section className="relative overflow-hidden py-16 lg:py-24 border-b border-slate-800/80 bg-gradient-to-b from-slate-950 via-slate-900/40 to-slate-950">
+                <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b08_1px,transparent_1px),linear-gradient(to_bottom,#1e293b08_1px,transparent_1px)] bg-[size:4rem_4rem]"></div>
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
+                  <div className="max-w-3xl">
+                    {/* Hero Upper Scarcity & Model Badge */}
+                    <div className="inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-lg bg-orange-500/10 border border-orange-500/30 text-orange-400 text-xs font-mono mb-6 max-w-full tabular-nums">
+                      <span className="font-bold text-emerald-400">{capacity.label}</span>
+                      <span className="text-slate-600">·</span>
+                      <span>Async-by-Default + 1 Weekly Strategic Sync</span>
+                    </div>
+                    <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold text-white tracking-tight leading-tight">
+                      Stop scheduling discovery calls.<br />
+                      <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 via-amber-400 to-amber-200">
+                        Deploy verified cloud architectures on spec.
+                      </span>
+                    </h1>
+                    <p className="mt-6 text-base sm:text-lg text-slate-300 leading-relaxed font-light">
+                      Archtechnix delivers fixed-price $3,500 Pilot Audits and $7,500/mo fractional architecture retainers for scaling technology enterprises—combining decoupled data mesh engineering, automated OPA Rego compliance, and sub-15 minute RPO/RTO validation.
+                    </p>
+                    <div className="mt-8 flex flex-wrap gap-3 sm:gap-4 items-center">
+                      <button
+                        onClick={() => handleStripeCheckout('diagnostic')}
+                        disabled={isCheckingOut}
+                        className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-5 py-3.5 rounded-xl shadow-lg shadow-orange-500/20 flex items-center space-x-2 transition-all font-mono text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
+                      >
+                        <span>Start $3,500 Pilot Audit</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => navigateToModule('funnel', 'bottleneck-assessment-section')}
+                        className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold px-5 py-3.5 rounded-xl flex items-center space-x-2 transition-all font-mono text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                      >
+                        <span>5-Point Bottleneck Assessment</span>
+                        <Calculator className="w-4 h-4 text-orange-400" />
+                      </button>
+                      <button
+                        onClick={() => navigateToModule('audit', 'pilot-audit-section')}
+                        className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold px-5 py-3.5 rounded-xl flex items-center space-x-2 transition-all font-mono text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                      >
+                        <span>Pilot Audit Hub</span>
+                        <ShieldCheck className="w-4 h-4 text-teal-400" />
+                      </button>
+                      <button
+                        onClick={() => navigateToModule('retainer', 'retainer-hub-section')}
+                        className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold px-5 py-3.5 rounded-xl flex items-center space-x-2 transition-all font-mono text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                      >
+                        <span>Retainer Hub</span>
+                        <FileCode2 className="w-4 h-4 text-violet-400" />
+                      </button>
                     </div>
 
-                    <div className="mt-6 pt-4 border-t border-slate-800/80 flex justify-between items-center">
-                      <span className="text-[11px] font-mono text-slate-500">Autonomous Architecture</span>
-                      <button
-                        onClick={() => handleOpenPrototype(proto.id)}
-                        className="text-xs text-orange-400 hover:text-orange-300 font-mono flex items-center space-x-1"
-                      >
-                        <span>Inspect Architecture Spec</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
+                    {/* Quick Section Anchors */}
+                    <div className="mt-5 flex flex-wrap items-center gap-2.5 text-[11px] font-mono text-slate-400">
+                      <span className="text-slate-500">Direct Jump:</span>
+                      <button onClick={() => navigateToModule('funnel', 'bottleneck-assessment-section')} className="text-slate-300 hover:text-orange-400 transition-colors underline underline-offset-2">
+                        Bottleneck Quiz
+                      </button>
+                      <span className="text-slate-700" aria-hidden="true">·</span>
+                      <button onClick={() => navigateToModule('audit', 'pilot-audit-section')} className="text-slate-300 hover:text-teal-400 transition-colors underline underline-offset-2">
+                        Compliance Matrix
+                      </button>
+                      <span className="text-slate-700" aria-hidden="true">·</span>
+                      <button onClick={() => navigateToModule('retainer', 'retainer-hub-section')} className="text-slate-300 hover:text-violet-400 transition-colors underline underline-offset-2">
+                        SSD / ADRs & Sync Agenda
+                      </button>
+                      <span className="text-slate-700" aria-hidden="true">·</span>
+                      <button onClick={() => navigateToModule('funnel', 'zero-intake-section')} className="text-slate-300 hover:text-cyan-400 transition-colors underline underline-offset-2">
+                        Schedule A Spec
+                      </button>
+                      <span className="text-slate-700" aria-hidden="true">·</span>
+                      <button onClick={() => navigateToModule('retainer', 'integrations-section')} className="text-slate-300 hover:text-orange-400 transition-colors underline underline-offset-2">
+                        GitHub OAuth
+                      </button>
+                      <span className="text-slate-700" aria-hidden="true">·</span>
+                      <button onClick={() => navigateToModule('retainer', 'advisory-availability-section')} className="text-slate-300 hover:text-emerald-400 transition-colors underline underline-offset-2">
+                        Sync Calendar
+                      </button>
+                      <span className="text-slate-700" aria-hidden="true">·</span>
+                      <button onClick={() => setMode('academy')} className="text-cyan-400 hover:text-cyan-300 transition-colors underline underline-offset-2">
+                        Flex Wizard
                       </button>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          </section>
+                </div>
+              </section>
 
-          {/* Principal Advisory Team */}
-          <section id="advisory-team-section" className="py-16 bg-slate-950 border-b border-slate-800">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <AdvisoryTeam />
-            </div>
-          </section>
+              {/* Operational Highlights / Dedicated Workflow Comparison */}
+              <section className="py-12 bg-slate-950 border-b border-slate-800">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                  <h2 className="text-xs font-mono uppercase tracking-widest text-slate-400 mb-6 flex items-center space-x-2">
+                    <ShieldCheck className="w-4 h-4 text-teal-400" />
+                    <span>The Asynchronous-First Operating Model with Weekly Sync Window</span>
+                  </h2>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 hover:border-teal-500/40 transition-colors">
+                      <div className="text-teal-400 mb-3"><Ban className="w-6 h-6" /></div>
+                      <h3 className="font-bold text-white text-base">Async-First + 1hr Weekly Sync</h3>
+                      <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+                        Zero discovery call fatigue. Day-to-day work is spec-driven, with up to 1 full hour of weekly synchronized Teams/phone communication available at client request.
+                      </p>
+                    </div>
 
-          {/* Principal Architect Advisory Availability & 1-Hour Sync Booking */}
-          <section id="advisory-availability-section" className="py-16 bg-slate-900/40 border-b border-slate-800">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <AdvisoryAvailability 
-                onShowToast={showToast}
-                defaultOrg={intakeData.org}
-                defaultRepo={intakeData.repo}
-              />
-            </div>
-          </section>
+                    <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 hover:border-cyan-500/40 transition-colors">
+                      <div className="text-cyan-400 mb-3"><Database className="w-6 h-6" /></div>
+                      <h3 className="font-bold text-white text-base">Decoupled Data Mesh</h3>
+                      <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+                        Domain-driven federated data architectures with sub-15 minute RPO/RTO target disaster recovery blueprints.
+                      </p>
+                    </div>
 
-          {/* Frequently Asked Questions */}
-          <section id="faq-section" className="py-16 bg-slate-900/40 border-b border-slate-800">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <FaqSection />
-            </div>
-          </section>
+                    <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 hover:border-violet-500/40 transition-colors">
+                      <div className="text-violet-400 mb-3"><Key className="w-6 h-6" /></div>
+                      <h3 className="font-bold text-white text-base">Key Shredding & OPA</h3>
+                      <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+                        Policy-as-code automation and cryptographic key shredding protocols for GDPR/CCPA & zero-trust compliance.
+                      </p>
+                    </div>
 
-          {/* Operational Business Documents & Linked Glossary */}
-          <section className="py-16 bg-slate-950 border-b border-slate-800">
+                    <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800 hover:border-orange-500/40 transition-colors">
+                      <div className="text-orange-400 mb-3"><Terminal className="w-6 h-6" /></div>
+                      <h3 className="font-bold text-white text-base">Git-Driven Artifacts</h3>
+                      <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+                        Final artifacts delivered strictly as PRs, Terraform modules, Open Policy Agent bundles, and architecture diagrams.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* Module 1: Interactive 5-Question Technical Bottleneck Assessment */}
+              <section id="bottleneck-assessment-section" className="py-16 bg-slate-950 border-b border-slate-800">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                  <BottleneckAssessment
+                    organizationName={intakeData.org}
+                    capacity={capacity}
+                    isCheckingOut={isCheckingOut}
+                    onLaunchPilotCheckout={() => handleStripeCheckout('diagnostic')}
+                    onShowToast={showToast}
+                    onSyncFindingsToIntake={(summaryNotes, recommendedTier) => {
+                      setSelectedTier(recommendedTier);
+                      setIntakeData((prev) => ({
+                        ...prev,
+                        notes: summaryNotes,
+                      }));
+                      navigateToModule('funnel', 'zero-intake-section');
+                    }}
+                  />
+                </div>
+              </section>
+
+              {/* Interactive Pricing Calculator Section */}
+              <section id="pricing-section" className="py-16 bg-slate-900/40 border-b border-slate-800">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                  <div className="text-center max-w-2xl mx-auto mb-12">
+                    <span className="text-xs font-mono uppercase tracking-wider text-orange-400 bg-orange-500/10 px-3 py-1 rounded-full border border-orange-500/20">
+                      Transparent Procurement
+                    </span>
+                    <h2 className="text-3xl font-extrabold text-white mt-3">Productized Advisory Tier Calculator</h2>
+                    <p className="text-slate-400 text-sm mt-2">
+                      Select your scope and immediately initiate $3,500 Pilot Audit or $7,500/mo Retainer checkout via Stripe.
+                    </p>
+                  </div>
+
+                  <PricingCalculator
+                    selectedTier={selectedTier}
+                    onSelectTier={setSelectedTier}
+                    selectedAddons={selectedAddons}
+                    onToggleAddon={handleToggleAddon}
+                    onSimulateStripe={() => handleStripeCheckout()}
+                    onSimulateWebhook={handleSimulateWebhook}
+                    onScrollToIntake={scrollToIntake}
+                    isCheckingOut={isCheckingOut}
+                    capacity={capacity}
+                  />
+                </div>
+              </section>
+
+              {/* Zero-Meeting Intake Specification Section */}
+              <section id="zero-intake-section" className="py-16 bg-slate-950 border-b border-slate-800">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                  <div className="max-w-3xl mb-8">
+                    <span className="text-xs font-mono uppercase tracking-wider text-teal-400 bg-teal-500/10 px-3 py-1 rounded-full border border-teal-500/20">
+                      Protocol Intake Engine
+                    </span>
+                    <h2 className="text-3xl font-extrabold text-white mt-3">Schedule A: Zero-Meeting Intake Specification</h2>
+                    <p className="text-slate-400 text-sm mt-2">
+                      Dedicated workflow replication. Fill in infrastructure coordinates—drafts autosave locally in IndexedDB and sync to Cloud SQL on sign-in.
+                    </p>
+                  </div>
+
+                  <IntakeGenerator
+                    intakeData={intakeData}
+                    onUpdate={setIntakeData}
+                    onShowToast={showToast}
+                  />
+                </div>
+              </section>
+
+              {/* Visual Step-by-Step 72-Hour Turnaround Progress Timeline & Automation Events Section */}
+              <section id="timeline-section" className="py-16 bg-slate-900/30 border-b border-slate-800">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+                  <TurnaroundTimeline 
+                    webhookTriggered={webhookTriggered}
+                    onTriggerWebhook={handleSimulateWebhook}
+                  />
+                  <RecentAutomationEvents 
+                    webhookTriggered={webhookTriggered}
+                    onShowToast={showToast}
+                  />
+                </div>
+              </section>
+
+              {/* Sub-15m RPO/RTO Disaster Recovery Benchmark Visualization */}
+              <section id="rpo-rto-section" className="py-16 bg-slate-950 border-b border-slate-800">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                  <RpoRtoBenchmarkChart />
+                </div>
+              </section>
+
+              {/* Enterprise CTO Success Stories / Testimonial Carousel */}
+              <section id="testimonials-section" className="py-16 bg-slate-900/40 border-b border-slate-800">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                  <TestimonialCarousel />
+                </div>
+              </section>
+
+              {/* Applied Engineering & Portfolio Hub */}
+              <section className="py-16 bg-slate-950 border-b border-slate-800">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                  <div className="max-w-3xl mb-12">
+                    <span className="text-xs font-mono uppercase tracking-wider text-violet-400 bg-violet-500/10 px-3 py-1 rounded-full border border-violet-500/20">
+                      Applied Engineering Proof of Work
+                    </span>
+                    <h2 className="text-3xl font-extrabold text-white mt-3">Production Architecture Portfolio</h2>
+                    <p className="text-slate-400 text-sm mt-2">
+                      Battle-tested prototypes and architectures built across the Archtechnix advisory ecosystem.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {PROTOTYPE_PORTFOLIO.map((proto) => (
+                      <div
+                        key={proto.id}
+                        className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 hover:border-slate-700 transition-all flex flex-col justify-between"
+                      >
+                        <div>
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-[11px] font-mono text-cyan-400 bg-cyan-500/10 px-2.5 py-0.5 rounded-md border border-cyan-500/20">
+                              {proto.badge}
+                            </span>
+                            <span className="text-xs font-mono text-emerald-400 flex items-center space-x-1">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>{proto.statusMetric}</span>
+                            </span>
+                          </div>
+                          <h3 className="text-lg font-bold text-white">{proto.title}</h3>
+                          <p className="text-xs text-slate-400 mt-2 leading-relaxed">{proto.description}</p>
+
+                          <div className="mt-4 flex flex-wrap gap-2 text-[10px] font-mono">
+                            {proto.techStack.map((tech: string, i: number) => (
+                              <span key={i} className="px-2 py-0.5 bg-slate-950 text-slate-300 rounded border border-slate-800">
+                                {tech}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="mt-6 pt-4 border-t border-slate-800/80 flex justify-between items-center">
+                          <span className="text-[11px] font-mono text-slate-500">Autonomous Architecture</span>
+                          <button
+                            onClick={() => handleOpenPrototype(proto.id)}
+                            className="text-xs text-orange-400 hover:text-orange-300 font-mono flex items-center space-x-1"
+                          >
+                            <span>Inspect Architecture Spec</span>
+                            <ArrowRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </section>
+
+              {/* Principal Advisory Team */}
+              <section id="advisory-team-section" className="py-16 bg-slate-900/40 border-b border-slate-800">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                  <AdvisoryTeam />
+                </div>
+              </section>
+
+              {/* Frequently Asked Questions */}
+              <section id="faq-section" className="py-16 bg-slate-950 border-b border-slate-800">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                  <FaqSection />
+                </div>
+              </section>
+            </>
+          )}
+
+          {portalTab === 'audit' && (
+            <>
+              {/* Module 2: Pilot Audit Diagnostic Dashboard */}
+              <section id="pilot-audit-section" className="py-12 bg-slate-950 border-b border-slate-800">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                  <PilotAuditDashboard
+                    isCheckingOut={isCheckingOut}
+                    onLaunchPilotCheckout={() => handleStripeCheckout('diagnostic')}
+                    onShowToast={showToast}
+                  />
+                </div>
+              </section>
+
+              {/* Live OPA Rego Scanner Section */}
+              <section id="opa-scanner-section" className="py-16 bg-slate-900/30 border-b border-slate-800">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                  <div className="max-w-3xl mb-8">
+                    <span className="text-xs font-mono uppercase tracking-wider text-cyan-400 bg-cyan-500/10 px-3 py-1 rounded-full border border-cyan-500/20">
+                      Interactive Compliance Sandbox
+                    </span>
+                    <h2 className="text-3xl font-extrabold text-white mt-3">Live Policy-as-Code (OPA Rego) Scanner</h2>
+                    <p className="text-slate-400 text-sm mt-2">
+                      Test production security rules against cloud infrastructure states in real time. Validate compliance before merging PRs.
+                    </p>
+                  </div>
+
+                  <OpaScanner />
+                </div>
+              </section>
+            </>
+          )}
+
+          {portalTab === 'retainer' && (
+            <>
+              {/* Module 3: Retainer Governance Hub (SSDs, ADRs, Weekly Sync Agenda Builder) */}
+              <section id="retainer-hub-section" className="py-12 bg-slate-950 border-b border-slate-800">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                  <RetainerGovernanceHub
+                    isCheckingOut={isCheckingOut}
+                    onActivateRetainerCheckout={() => handleStripeCheckout('retainer')}
+                    onShowToast={showToast}
+                  />
+                </div>
+              </section>
+
+              {/* Principal Architect Advisory Availability & 1-Hour Sync Booking */}
+              <section id="advisory-availability-section" className="py-16 bg-slate-900/40 border-b border-slate-800">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                  <AdvisoryAvailability 
+                    onShowToast={showToast}
+                    defaultOrg={intakeData.org}
+                    defaultRepo={intakeData.repo}
+                  />
+                </div>
+              </section>
+
+              {/* GitHub Organization OAuth Integration & Automated Repository Provisioning Section */}
+              <section id="integrations-section" className="py-16 bg-slate-950 border-b border-slate-800">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                  <IntegrationsSection 
+                    onShowToast={showToast}
+                    defaultOrg={intakeData.org}
+                    onRepositoryProvisioned={(repoData) => {
+                      setIntakeData((prev) => ({
+                        ...prev,
+                        repo: repoData.repoUrl
+                      }));
+                    }}
+                  />
+                </div>
+              </section>
+            </>
+          )}
+
+          {portalTab === 'funnel' && (
+            <>
+              {/* Operational Business Documents & Linked Glossary */}
+              <section className="py-16 bg-slate-950 border-b border-slate-800">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
               <div className="max-w-3xl mb-8">
                 <span className="text-xs font-mono uppercase tracking-wider text-orange-400 bg-orange-500/10 px-3 py-1 rounded-full border border-orange-500/20">
@@ -1049,6 +1159,8 @@ ${JSON.stringify(webhookEvent, null, 2)}
               </div>
             </div>
           </section>
+            </>
+          )}
         </main>
       )}
 
@@ -1179,6 +1291,9 @@ ${JSON.stringify(webhookEvent, null, 2)}
         onClose={() => setModal({ ...modal, isOpen: false })}
         onShowToast={showToast}
       />
+
+      {/* Offline Status Indicator */}
+      <OfflineIndicator />
 
       {/* Global Toast Notification */}
       {toastMessage && (

@@ -19,6 +19,7 @@ import {
   CalendarCheck
 } from 'lucide-react';
 import { ARCHITECTS, ArchitectProfile } from './AdvisoryTeam';
+import { useAuth } from '../contexts/AuthContext';
 
 export interface BookingRecord {
   id: string;
@@ -95,7 +96,9 @@ export const AdvisoryAvailability: React.FC<AdvisoryAvailabilityProps> = ({
   const [confirmedBooking, setConfirmedBooking] = useState<BookingRecord | null>(null);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
 
-  // Sync bookings to localStorage
+  const { user, idToken, signInWithGoogle } = useAuth();
+
+  // Sync bookings to localStorage & hydrate from Cloud SQL on mount
   useEffect(() => {
     try {
       localStorage.setItem('archtechnix_advisory_bookings', JSON.stringify(bookings));
@@ -103,6 +106,17 @@ export const AdvisoryAvailability: React.FC<AdvisoryAvailabilityProps> = ({
       console.warn('Booking persistence error:', e);
     }
   }, [bookings]);
+
+  useEffect(() => {
+    fetch('/api/advisory/slots')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.success && Array.isArray(data.bookings) && data.bookings.length > 0) {
+          setBookings(data.bookings);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Compute weekdays for the currently selected week offset
   const getWeekDays = () => {
@@ -156,9 +170,29 @@ export const AdvisoryAvailability: React.FC<AdvisoryAvailabilityProps> = ({
 
     setIsSubmitting(true);
     try {
+      let token = idToken;
+      if (!user || !token) {
+        await signInWithGoogle();
+        const { auth } = await import('../lib/firebase');
+        if (auth.currentUser) {
+          token = await auth.currentUser.getIdToken();
+        }
+      }
+
+      if (!token) {
+        if (onShowToast) {
+          onShowToast('Google Sign-In is required to persist your 1-Hour Sync Booking.');
+        }
+        setIsSubmitting(false);
+        return;
+      }
+
       const response = await fetch('/api/advisory/book', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           architectId: activeSlot.architect.id,
           architectName: activeSlot.architect.name,
@@ -174,56 +208,20 @@ export const AdvisoryAvailability: React.FC<AdvisoryAvailabilityProps> = ({
       });
 
       const data = await response.json();
-      if (data.success && data.booking) {
+      if (response.ok && data.success && data.booking) {
         const newRecord: BookingRecord = data.booking;
         setBookings((prev) => [newRecord, ...prev]);
         setConfirmedBooking(newRecord);
         if (onShowToast) {
-          onShowToast(`1-Hour Advisory Sync Confirmed with ${activeSlot.architect.name}!`);
+          onShowToast(`1-Hour Advisory Sync persisted to Cloud SQL with ${activeSlot.architect.name}!`);
         }
       } else {
-        // Fallback local booking
-        const fallbackBooking: BookingRecord = {
-          id: `sync_${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-          architectId: activeSlot.architect.id,
-          architectName: activeSlot.architect.name,
-          date: activeSlot.date,
-          timeSlot: activeSlot.timeSlot,
-          timezone: selectedTimezone,
-          orgName: bookingOrg,
-          attendeeEmail: bookingEmail,
-          topic: bookingTopic,
-          notes: bookingNotes,
-          repoUrl: bookingRepo,
-          meetingUrl: `https://meet.google.com/arc-${Math.random().toString(36).substring(2, 5)}-${Math.random().toString(36).substring(2, 5)}`,
-          bookedAt: new Date().toISOString()
-        };
-        setBookings((prev) => [fallbackBooking, ...prev]);
-        setConfirmedBooking(fallbackBooking);
-        if (onShowToast) {
-          onShowToast(`1-Hour Advisory Sync Confirmed with ${activeSlot.architect.name}!`);
-        }
+        throw new Error(data.error || 'Failed to save booking');
       }
-    } catch {
-      // Offline fallback
-      const fallbackBooking: BookingRecord = {
-        id: `sync_${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
-        architectId: activeSlot.architect.id,
-        architectName: activeSlot.architect.name,
-        date: activeSlot.date,
-        timeSlot: activeSlot.timeSlot,
-        timezone: selectedTimezone,
-        orgName: bookingOrg,
-        attendeeEmail: bookingEmail,
-        topic: bookingTopic,
-        notes: bookingNotes,
-        repoUrl: bookingRepo,
-        meetingUrl: `https://meet.google.com/arc-sync-${Math.random().toString(36).substring(2, 6)}`,
-        bookedAt: new Date().toISOString()
-      };
-      setBookings((prev) => [fallbackBooking, ...prev]);
-      setConfirmedBooking(fallbackBooking);
-      if (onShowToast) onShowToast(`1-Hour Sync Confirmed!`);
+    } catch (err: any) {
+      if (onShowToast) {
+        onShowToast(err?.message || 'Booking was cancelled or failed.');
+      }
     } finally {
       setIsSubmitting(false);
     }
