@@ -1035,6 +1035,100 @@ app.patch('/api/governance/evolution/:id', (req: Request, res: Response) => {
   return res.json({ success: true, log: target });
 });
 
+const scopeBoundaryStore: Array<{
+  id: string;
+  title: string;
+  requester: string;
+  requestedHours: number;
+  classification: 'in_scope' | 'out_of_scope_retainer_candidate';
+  status: 'open' | 'in_review' | 'completed' | 'escalated_to_retainer';
+  rationale: string;
+  createdAt: string;
+}> = [
+  {
+    id: 'sb-001',
+    title: 'Multi-region Aurora WAL streaming & sub-15m failover topology audit',
+    requester: 'VP Infrastructure',
+    requestedHours: 8,
+    classification: 'in_scope',
+    status: 'completed',
+    rationale: 'Covered directly by Tier 1 Pilot Audit Schedule A resilience diagnostic.',
+    createdAt: new Date('2026-11-11T11:00:00Z').toISOString(),
+  },
+  {
+    id: 'sb-002',
+    title: 'OPA Rego pre-commit compliance bundle for KMS envelope encryption',
+    requester: 'CISO Office',
+    requestedHours: 6,
+    classification: 'in_scope',
+    status: 'in_review',
+    rationale: 'Included within 14-day DevSecOps posture & compliance artifact sprint.',
+    createdAt: new Date('2026-11-11T16:20:00Z').toISOString(),
+  },
+  {
+    id: 'sb-003',
+    title: 'Cross-account Kafka & Debezium live zero-downtime migration execution',
+    requester: 'Platform Data Team',
+    requestedHours: 24,
+    classification: 'out_of_scope_retainer_candidate',
+    status: 'escalated_to_retainer',
+    rationale: 'Exceeds fixed 14-day diagnostic boundary; requires ongoing Tier 2 Retainer PR execution.',
+    createdAt: new Date('2026-11-12T09:15:00Z').toISOString(),
+  },
+];
+
+app.get('/api/scope-boundaries', (_req: Request, res: Response) => {
+  res.json({ success: true, items: scopeBoundaryStore });
+});
+
+app.post('/api/scope-boundaries', (req: Request, res: Response) => {
+  const { id, title, requester, requestedHours, classification, status, rationale } = req.body || {};
+  if (!title) {
+    return res.status(400).json({ error: 'title is required.' });
+  }
+  const item = {
+    id: String(id || `sb-${Date.now().toString(36)}`),
+    title: String(title).trim(),
+    requester: String(requester || 'Client Engineering').trim(),
+    requestedHours: Math.max(1, Number(requestedHours) || 4),
+    classification: (
+      classification === 'out_of_scope_retainer_candidate'
+        ? 'out_of_scope_retainer_candidate'
+        : 'in_scope'
+    ) as 'in_scope' | 'out_of_scope_retainer_candidate',
+    status: (
+      status === 'in_review' || status === 'completed' || status === 'escalated_to_retainer'
+        ? status
+        : 'open'
+    ) as 'open' | 'in_review' | 'completed' | 'escalated_to_retainer',
+    rationale: String(rationale || '').trim(),
+    createdAt: new Date().toISOString(),
+  };
+  scopeBoundaryStore.unshift(item);
+  return res.status(201).json({ success: true, item });
+});
+
+app.patch('/api/scope-boundaries/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { status, classification } = req.body || {};
+  const target = scopeBoundaryStore.find((item) => item.id === id);
+  if (!target) {
+    return res.status(404).json({ error: 'Scope boundary item not found.' });
+  }
+  if (
+    status === 'open' ||
+    status === 'in_review' ||
+    status === 'completed' ||
+    status === 'escalated_to_retainer'
+  ) {
+    target.status = status;
+  }
+  if (classification === 'in_scope' || classification === 'out_of_scope_retainer_candidate') {
+    target.classification = classification;
+  }
+  return res.json({ success: true, item: target });
+});
+
 // Health check endpoint
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({

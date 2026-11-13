@@ -144,3 +144,42 @@ export interface CleanupAuditReport {
   overallClean: boolean;
   items: CleanupAuditItem[];
 }
+
+// ============================================================================
+// PRODUCTION v2.0: SCOPE BOUNDARIES & PRE-FLIGHT DEBT SCANNER
+// ============================================================================
+
+export type ScopeClassification = 'in_scope' | 'out_of_scope_retainer_candidate';
+
+export type ScopeTaskStatus = 'open' | 'in_review' | 'completed' | 'escalated_to_retainer';
+
+export interface ScopeBoundaryItem {
+  id: string;
+  title: string;
+  requester: string;
+  requestedHours: number;
+  classification: ScopeClassification;
+  status: ScopeTaskStatus;
+  rationale: string;
+  createdAt: string;
+}
+
+export type PreFlightDebtCategory = 'undocumented_api' | 'missing_rpo_metrics' | 'brittle_db_dependency';
+
+export interface PreFlightDebtFinding {
+  id: string;
+  category: PreFlightDebtCategory;
+  severity: 'critical' | 'high' | 'medium';
+  title: string;
+  detectedSignal: string;
+  remediationAction: string;
+  resolved: boolean;
+}
+
+export interface PreFlightScanReport {
+  scannedAt: string;
+  repoUrl: string;
+  cloudProvider: string;
+  rpoTarget: string;
+  findings: PreFlightDebtFinding[];
+}

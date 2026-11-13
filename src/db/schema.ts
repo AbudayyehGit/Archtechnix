@@ -164,6 +164,40 @@ export const advisoryBookings = pgTable('advisory_bookings', {
   bookedAt: timestamp('booked_at').defaultNow().notNull(),
 });
 
+// 10. Scope Boundary Ledger (tracks in-scope audit deliverables vs out_of_scope_retainer_candidate)
+export const scopeBoundaries = pgTable('scope_boundaries', {
+  id: serial('id').primaryKey(),
+  clientId: integer('client_id')
+    .references(() => clients.id, { onDelete: 'cascade' })
+    .notNull(),
+  title: text('title').notNull(),
+  requester: text('requester').notNull().default('Client Engineering'),
+  requestedHours: integer('requested_hours').notNull().default(4),
+  classification: text('classification').notNull().default('in_scope'), // in_scope | out_of_scope_retainer_candidate
+  status: text('status').notNull().default('open'), // open | in_review | completed | escalated_to_retainer
+  rationale: text('rationale').notNull().default(''),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// 11. System Steady-State Checkpoints
+export const systemSteadyStates = pgTable('system_steady_states', {
+  id: text('id').primaryKey(),
+  checkpointLabel: text('checkpoint_label').notNull(),
+  gitCommitHash: text('git_commit_hash').notNull(),
+  snapshotMetadata: jsonb('snapshot_metadata').$type<Record<string, unknown>>().notNull(),
+  establishedAt: timestamp('established_at').defaultNow().notNull(),
+});
+
+// 12. Evolutionary Skill Builder Telemetry Logs
+export const skillEvolutionLogs = pgTable('skill_evolution_logs', {
+  id: text('id').primaryKey(),
+  skillName: text('skill_name').notNull(),
+  performanceMetric: jsonb('performance_metric').$type<Record<string, unknown>>().notNull(),
+  clientRequirementDelta: text('client_requirement_delta'),
+  evolutionStatus: text('evolution_status').notNull().default('pending_review'), // pending_review | auto_adapted | archived
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // Drizzle Relations
 export const clientsRelations = relations(clients, ({ many }) => ({
   audits: many(audits),
@@ -174,6 +208,7 @@ export const clientsRelations = relations(clients, ({ many }) => ({
   assessments: many(bottleneckAssessments),
   intakeSpecs: many(intakeSpecs),
   advisoryBookings: many(advisoryBookings),
+  scopeBoundaries: many(scopeBoundaries),
 }));
 
 export const auditsRelations = relations(audits, ({ one }) => ({
@@ -202,4 +237,8 @@ export const intakeSpecsRelations = relations(intakeSpecs, ({ one }) => ({
 
 export const advisoryBookingsRelations = relations(advisoryBookings, ({ one }) => ({
   client: one(clients, { fields: [advisoryBookings.clientId], references: [clients.id] }),
+}));
+
+export const scopeBoundariesRelations = relations(scopeBoundaries, ({ one }) => ({
+  client: one(clients, { fields: [scopeBoundaries.clientId], references: [clients.id] }),
 }));

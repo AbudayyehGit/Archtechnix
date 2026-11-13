@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
+  Clock,
   CreditCard,
   Download,
   ExternalLink,
@@ -11,17 +12,26 @@ import {
   LogIn,
   LogOut,
   Plus,
+  RotateCcw,
   ShieldCheck,
   Video,
   X,
 } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, type CapacitySummary } from '../contexts/AuthContext';
 import {
   DEFAULT_OFFLINE_METRICS,
   offlineDb,
   type OfflineComplianceMetric,
 } from '../lib/offlineDb';
+import type {
+  IntakeSpecData,
+  PreFlightDebtFinding,
+  ScopeBoundaryItem,
+  ScopeTaskStatus,
+} from '../types';
 import { MarkdownViewer } from './MarkdownViewer';
+import { ScopeBoundaryLog } from './ScopeBoundaryLog';
+import { PreFlightDebtScanner } from './PreFlightDebtScanner';
 
 const DEFAULT_ROADMAP_MD = `# 14-Day Pilot Audit: Critical RPO/RTO Remediation Roadmap
 
@@ -41,16 +51,51 @@ const DEFAULT_ROADMAP_MD = `# 14-Day Pilot Audit: Critical RPO/RTO Remediation R
    - Immutable object-lock cold backups retain raw tenant PII under a shared KEK without per-tenant DEKs.
    - *Fix*: Partition tenant storage envelopes with KMS per-tenant DEK wrapping for deterministic key shredding.`;
 
+const SPRINT_WINDOW_KEY = 'archtechnix_sprint_start_v1';
+const FOURTEEN_DAYS_MS = 14 * 24 * 60 * 60 * 1000;
+
 interface PilotAuditDashboardProps {
   onLaunchPilotCheckout: () => void;
+  onActivateRetainerCheckout?: () => void;
   onShowToast: (msg: string) => void;
   isCheckingOut?: boolean;
+  intakeData?: IntakeSpecData;
+  scopeBoundaries?: ScopeBoundaryItem[];
+  onAddScopeItem?: (item: ScopeBoundaryItem) => void;
+  onUpdateScopeStatus?: (id: string, status: ScopeTaskStatus) => void;
+  onEscalateOutOfScopeToSkillBuilder?: (item: ScopeBoundaryItem) => void;
+  capacity?: CapacitySummary;
 }
+
+const DEFAULT_FALLBACK_INTAKE: IntakeSpecData = {
+  org: 'Apex FinTech Systems',
+  cloud: 'AWS (EKS, Aurora, KMS)',
+  rpo: 'Sub-15 Minute (Zero Data Loss)',
+  repo: 'https://github.com/apex-fintech/core-mesh',
+  compliance: { gdpr: true, soc2: true, nist: false },
+  notes: 'Decoupled event mesh audit & sub-15m RTO disaster recovery blueprints.',
+};
+
+const DEFAULT_FALLBACK_CAPACITY: CapacitySummary = {
+  maxSlots: 4,
+  filledSlots: 2,
+  availableSlots: 2,
+  dbActiveCount: 2,
+  weeklyHoursCap: '8–10 hrs/wk max',
+  label: '2 of 4 Retainer Slots Open',
+};
 
 export const PilotAuditDashboard: React.FC<PilotAuditDashboardProps> = ({
   onLaunchPilotCheckout,
+  onActivateRetainerCheckout,
   onShowToast,
   isCheckingOut = false,
+  intakeData = DEFAULT_FALLBACK_INTAKE,
+  scopeBoundaries = [],
+  onAddScopeItem,
+  onUpdateScopeStatus,
+  onEscalateOutOfScopeToSkillBuilder,
+  capacity = DEFAULT_FALLBACK_CAPACITY,
 }) => {
   const {
     user,
@@ -67,6 +112,17 @@ export const PilotAuditDashboard: React.FC<PilotAuditDashboardProps> = ({
   const [updatingId, setUpdatingId] = useState<number | null>(null);
   const [activeDocTab, setActiveDocTab] = useState<'roadmap' | 'loom'>('roadmap');
 
+  // Persistent 14-day diagnostic sprint start timestamp
+  const [sprintStartIso, setSprintStartIso] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(SPRINT_WINDOW_KEY);
+      if (saved && !Number.isNaN(Date.parse(saved))) return saved;
+    }
+    // Default to 3 days elapsed so the live countdown immediately ticks down from ~11 days
+    return new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+  });
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+
   // Custom Remediation Modal State
   const [showAddModal, setShowAddModal] = useState(false);
   const [newFramework, setNewFramework] = useState<'SOC2' | 'ISO27001' | 'NIST'>('SOC2');
@@ -76,6 +132,71 @@ export const PilotAuditDashboard: React.FC<PilotAuditDashboardProps> = ({
   const [newImpact, setNewImpact] = useState('');
   const [newNote, setNewNote] = useState('');
   const [creatingMetric, setCreatingMetric] = useState(false);
+
+  // Sync persisted sprint start timestamp & tick 1-second timer
+  useEffect(() => {
+    try {
+      localStorage.setItem(SPRINT_WINDOW_KEY, sprintStartIso);
+    } catch {
+      // Ignore storage error
+    }
+  }, [sprintStartIso]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const countdown = useMemo(() => {
+    const startMs = Date.parse(sprintStartIso);
+    const deadlineMs = startMs + FOURTEEN_DAYS_MS;
+    const remainingMs = Math.max(0, deadlineMs - nowMs);
+    const elapsedMs = Math.min(FOURTEEN_DAYS_MS, Math.max(0, nowMs - startMs));
+    const totalSeconds = Math.floor(remainingMs / 1000);
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const elapsedDays = Math.min(14, Math.floor(elapsedMs / (24 * 60 * 60 * 1000)) + 1);
+    const progressPct = Math.min(100, Math.round((elapsedMs / FOURTEEN_DAYS_MS) * 100));
+
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return {
+      days: pad(days),
+      hours: pad(hours),
+      minutes: pad(minutes),
+      seconds: pad(seconds),
+      elapsedDays,
+      progressPct,
+      expired: remainingMs === 0,
+      deadlineDate: new Date(deadlineMs).toISOString().split('T')[0],
+    };
+  }, [sprintStartIso, nowMs]);
+
+  const handleResetSprintClock = () => {
+    const freshIso = new Date().toISOString();
+    setSprintStartIso(freshIso);
+    onShowToast('14-Day Diagnostic Sprint Countdown initialized to Day 1.');
+  };
+
+  const handleFlagPreFlightToScope = (finding: PreFlightDebtFinding) => {
+    if (!onAddScopeItem) return;
+    onAddScopeItem({
+      id: `sb-pf-${Date.now().toString(36)}`,
+      title: `[Pre-Flight Debt] ${finding.title}`,
+      requester: 'PreFlightDebtScanner',
+      requestedHours: finding.severity === 'critical' ? 12 : 6,
+      classification:
+        finding.category === 'brittle_db_dependency'
+          ? 'out_of_scope_retainer_candidate'
+          : 'in_scope',
+      status:
+        finding.category === 'brittle_db_dependency' ? 'escalated_to_retainer' : 'open',
+      rationale: finding.detectedSignal,
+      createdAt: new Date().toISOString(),
+    });
+    onShowToast(`Logged "${finding.title}" into Scope Boundary Log.`);
+  };
 
   // Hydrate offline Dexie cache when signed out or before remote finishes
   useEffect(() => {
@@ -395,6 +516,58 @@ ${roadmapMarkdown}
         </div>
       </div>
 
+      {/* Persistent 14-Day Diagnostic Countdown Timer */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2 text-xs font-mono text-orange-400 font-bold uppercase tracking-wider">
+            <Clock className="w-4 h-4 shrink-0" />
+            <span>14-Day Scope-Bounded Pilot Audit Window</span>
+            <span className="text-slate-500">·</span>
+            <span className="text-cyan-400 tabular-nums">
+              Day {countdown.elapsedDays} of 14 (Target Close: {countdown.deadlineDate})
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 max-w-2xl">
+            Every Pilot Audit operates on a fixed 14-day clock to eliminate open-ended discovery drag. Out-of-scope asks roll cleanly into a $7,500/mo Retainer slot.
+          </p>
+          <div className="w-full max-w-md h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800 mt-2">
+            <div
+              className="h-full bg-gradient-to-r from-teal-400 via-cyan-400 to-orange-500 transition-all duration-300"
+              style={{ width: `${countdown.progressPct}%` }}
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 shrink-0">
+          <div className="grid grid-cols-4 gap-2 text-center font-mono tabular-nums">
+            {[
+              { label: 'DAYS', val: countdown.days },
+              { label: 'HRS', val: countdown.hours },
+              { label: 'MIN', val: countdown.minutes },
+              { label: 'SEC', val: countdown.seconds },
+            ].map((unit) => (
+              <div
+                key={unit.label}
+                className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 min-w-[58px]"
+              >
+                <div className="text-lg font-black text-white leading-tight">{unit.val}</div>
+                <div className="text-[10px] text-slate-500">{unit.label}</div>
+              </div>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={handleResetSprintClock}
+            title="Restart 14-day sprint countdown to Day 1"
+            className="min-h-[44px] px-3 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-xs font-mono text-slate-300 hover:text-white flex items-center space-x-1.5 transition-colors"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-orange-400" />
+            <span>Restart 14d</span>
+          </button>
+        </div>
+      </div>
+
       {/* 4 Compliance Readiness KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
@@ -449,6 +622,27 @@ ${roadmapMarkdown}
           </div>
         </div>
       </div>
+
+      {/* Automated Pre-Flight Onboarding Debt Scanner */}
+      <PreFlightDebtScanner
+        intakeData={intakeData}
+        onShowToast={onShowToast}
+        onFlagToScopeLog={onAddScopeItem ? handleFlagPreFlightToScope : undefined}
+      />
+
+      {/* Interactive Scope Boundary Log & Out-of-Scope Retainer Upgrade Trigger */}
+      <ScopeBoundaryLog
+        items={scopeBoundaries}
+        capacity={capacity}
+        onAddItem={(item) => onAddScopeItem?.(item)}
+        onUpdateStatus={(id, status) => onUpdateScopeStatus?.(id, status)}
+        onActivateRetainerCheckout={() =>
+          onActivateRetainerCheckout ? onActivateRetainerCheckout() : onLaunchPilotCheckout()
+        }
+        onEscalateOutOfScopeToSkillBuilder={onEscalateOutOfScopeToSkillBuilder}
+        onShowToast={onShowToast}
+        isCheckingOut={isCheckingOut}
+      />
 
       {/* Main Split: Compliance Readiness Matrix + RPO/RTO Roadmap & Loom Deliverable */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">

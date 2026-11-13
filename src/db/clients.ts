@@ -1,5 +1,5 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
-import { db } from './index.ts';
+import { db, isSqlConfigured } from './index.ts';
 import {
   adrs,
   advisoryBookings,
@@ -16,6 +16,179 @@ import {
 
 const MAX_RETAINER_SLOTS = 4;
 const BASELINE_RESERVED_SLOTS = 2;
+
+type ClientRow = typeof clients.$inferSelect;
+type AuditRow = typeof audits.$inferSelect;
+type RetainerRow = typeof retainers.$inferSelect;
+type ComplianceMetricRow = typeof complianceMetrics.$inferSelect;
+type AdrRow = typeof adrs.$inferSelect;
+type SyncAgendaRow = typeof syncAgendas.$inferSelect;
+type BottleneckAssessmentRow = typeof bottleneckAssessments.$inferSelect;
+type IntakeSpecRow = typeof intakeSpecs.$inferSelect;
+type AdvisoryBookingRow = typeof advisoryBookings.$inferSelect;
+
+const fallbackStore = {
+  nextId: 100,
+  clients: [] as ClientRow[],
+  audits: [] as AuditRow[],
+  retainers: [] as RetainerRow[],
+  complianceMetrics: [] as ComplianceMetricRow[],
+  adrs: [] as AdrRow[],
+  syncAgendas: [] as SyncAgendaRow[],
+  bottleneckAssessments: [] as BottleneckAssessmentRow[],
+  intakeSpecs: [] as IntakeSpecRow[],
+  advisoryBookings: [] as AdvisoryBookingRow[],
+};
+
+function genFallbackId(): number {
+  fallbackStore.nextId += 1;
+  return fallbackStore.nextId;
+}
+
+function isSqlConnectionError(err: unknown): boolean {
+  const checked = new Set<unknown>();
+  let cur: unknown = err;
+  while (cur && typeof cur === 'object' && !checked.has(cur)) {
+    checked.add(cur);
+    const code = (cur as { code?: string }).code;
+    const msg = (cur as { message?: string }).message || '';
+    if (
+      code === 'ECONNREFUSED' ||
+      code === 'ENOENT' ||
+      code === 'ENOTFOUND' ||
+      code === 'ETIMEDOUT' ||
+      code === '57P03' ||
+      msg.includes('ECONNREFUSED')
+    ) {
+      return true;
+    }
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+function fallbackGetOrCreateClient(uid: string, email: string, orgName?: string): ClientRow {
+  const cleanEmail = email || 'client@enterprise.io';
+  const existing = fallbackStore.clients.find((c) => c.uid === uid);
+  const now = new Date();
+  if (existing) {
+    existing.email = cleanEmail;
+    existing.updatedAt = now;
+    return existing;
+  }
+  const created: ClientRow = {
+    id: genFallbackId(),
+    uid,
+    email: cleanEmail,
+    organizationName: orgName || 'Apex FinTech Systems',
+    primaryCloud: 'AWS (EKS, Aurora, KMS)',
+    rpoTarget: 'Sub-15 Minute (Zero Data Loss)',
+    repoUrl: 'https://github.com/apex-fintech/core-mesh',
+    createdAt: now,
+    updatedAt: now,
+  };
+  fallbackStore.clients.push(created);
+  return created;
+}
+
+function fallbackSeedClientWorkspaceIfEmpty(clientId: number): void {
+  const now = new Date();
+  if (!fallbackStore.audits.some((a) => a.clientId === clientId)) {
+    fallbackStore.audits.push({
+      id: genFallbackId(),
+      clientId,
+      title: '14-Day Asynchronous Pilot Audit',
+      tier: 'diagnostic',
+      status: 'active',
+      overallScore: 44,
+      loomUrl: 'https://www.loom.com/share/archtechnix-pilot-briefing',
+      roadmapMarkdown: DEFAULT_ROADMAP_MARKDOWN,
+      stripeSessionId: null,
+      purchasedAt: now,
+      updatedAt: now,
+    });
+  }
+
+  if (!fallbackStore.retainers.some((r) => r.clientId === clientId)) {
+    fallbackStore.retainers.push({
+      id: genFallbackId(),
+      clientId,
+      status: 'inactive',
+      monthlyAmountUsd: 7500,
+      cadenceWindow: 'Async-by-Default + Thursdays 14:00 UTC (60m Sync)',
+      stripeSessionId: null,
+      stripeSubscriptionId: null,
+      activatedAt: null,
+      updatedAt: now,
+    });
+  }
+
+  if (!fallbackStore.complianceMetrics.some((m) => m.clientId === clientId)) {
+    for (const c of DEFAULT_COMPLIANCE_CONTROLS) {
+      fallbackStore.complianceMetrics.push({
+        id: genFallbackId(),
+        clientId,
+        framework: c.framework,
+        controlCode: c.controlCode,
+        controlTitle: c.controlTitle,
+        category: c.category,
+        severity: c.severity,
+        rpoRtoImpact: c.rpoRtoImpact,
+        isCompliant: c.isCompliant,
+        remediationNote: c.remediationNote,
+        updatedAt: now,
+      });
+    }
+  }
+
+  if (!fallbackStore.adrs.some((d) => d.clientId === clientId)) {
+    for (const doc of DEFAULT_ADRS) {
+      fallbackStore.adrs.push({
+        id: genFallbackId(),
+        clientId,
+        docType: doc.docType,
+        docNumber: doc.docNumber,
+        title: doc.title,
+        status: doc.status,
+        markdownContent: doc.markdownContent,
+        updatedAt: now,
+      });
+    }
+  }
+
+  if (!fallbackStore.syncAgendas.some((s) => s.clientId === clientId)) {
+    const nextThursday = new Date();
+    nextThursday.setDate(nextThursday.getDate() + ((4 + 7 - nextThursday.getDay()) % 7 || 7));
+    const syncDateStr = nextThursday.toISOString().split('T')[0];
+
+    fallbackStore.syncAgendas.push({
+      id: genFallbackId(),
+      clientId,
+      syncDate: syncDateStr,
+      timeWindow: '60 Minutes · Thursdays 14:00 UTC',
+      architectName: 'Tariq Abudayyeh',
+      agendaTitle: 'Weekly Strategic Sync: Cross-Region RPO Hardening & OPA Rollout',
+      preReadChecklist: DEFAULT_PREREAD,
+      decisionLogMarkdown: `### Pre-Sync Async Decisions\n- Approved OIDC federation migration window.\n- Pending sign-off on secondary region KMS key policy.`,
+      loomSummaryUrl: 'https://www.loom.com/share/archtechnix-weekly-preread',
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+}
+
+function computeCapacitySummary(dbActiveCount: number) {
+  const filledSlots = Math.min(MAX_RETAINER_SLOTS, BASELINE_RESERVED_SLOTS + dbActiveCount);
+  const availableSlots = Math.max(0, MAX_RETAINER_SLOTS - filledSlots);
+  return {
+    maxSlots: MAX_RETAINER_SLOTS,
+    filledSlots,
+    availableSlots,
+    dbActiveCount,
+    weeklyHoursCap: '20-25 hrs/week',
+    label: `Active Retainer Slots: ${availableSlots} / ${MAX_RETAINER_SLOTS} Available`,
+  };
+}
 
 const DEFAULT_ROADMAP_MARKDOWN = `# 14-Day Pilot Audit: Critical RPO/RTO Remediation Roadmap
 
@@ -229,6 +402,9 @@ export async function getOrCreateClient(
   email: string,
   orgName?: string
 ) {
+  if (!isSqlConfigured()) {
+    return fallbackGetOrCreateClient(uid, email, orgName);
+  }
   try {
     const cleanEmail = email || 'client@enterprise.io';
     const result = await db
@@ -249,12 +425,19 @@ export async function getOrCreateClient(
 
     return result[0];
   } catch (error) {
+    if (isSqlConnectionError(error)) {
+      return fallbackGetOrCreateClient(uid, email, orgName);
+    }
     console.error('Failed to getOrCreateClient:', error);
     throw new Error('Failed to synchronize client workspace profile.', { cause: error });
   }
 }
 
 export async function seedClientWorkspaceIfEmpty(clientId: number) {
+  if (!isSqlConfigured()) {
+    fallbackSeedClientWorkspaceIfEmpty(clientId);
+    return;
+  }
   try {
     const existingAudits = await db
       .select()
@@ -337,12 +520,48 @@ export async function seedClientWorkspaceIfEmpty(clientId: number) {
       });
     }
   } catch (error) {
+    if (isSqlConnectionError(error)) {
+      fallbackSeedClientWorkspaceIfEmpty(clientId);
+      return;
+    }
     console.error('Failed to seed client workspace:', error);
     throw new Error('Failed to initialize default advisory workspace.', { cause: error });
   }
 }
 
 export async function getClientWorkspace(uid: string, email: string) {
+  const buildFallbackWorkspace = () => {
+    const client = fallbackGetOrCreateClient(uid, email);
+    fallbackSeedClientWorkspaceIfEmpty(client.id);
+    const clientAudits = fallbackStore.audits
+      .filter((a) => a.clientId === client.id)
+      .sort((a, b) => b.id - a.id);
+    const clientRetainers = fallbackStore.retainers
+      .filter((r) => r.clientId === client.id)
+      .sort((a, b) => b.id - a.id);
+    return {
+      client,
+      audit: clientAudits[0] || null,
+      retainer: clientRetainers[0] || null,
+      complianceMetrics: fallbackStore.complianceMetrics
+        .filter((m) => m.clientId === client.id)
+        .sort((a, b) => a.id - b.id),
+      adrs: fallbackStore.adrs
+        .filter((d) => d.clientId === client.id)
+        .sort((a, b) => a.id - b.id),
+      syncAgendas: fallbackStore.syncAgendas
+        .filter((s) => s.clientId === client.id)
+        .sort((a, b) => b.id - a.id),
+      intakeSpecs: fallbackStore.intakeSpecs
+        .filter((i) => i.clientId === client.id)
+        .sort((a, b) => b.id - a.id),
+    };
+  };
+
+  if (!isSqlConfigured()) {
+    return buildFallbackWorkspace();
+  }
+
   try {
     const client = await getOrCreateClient(uid, email);
     await seedClientWorkspaceIfEmpty(client.id);
@@ -366,6 +585,9 @@ export async function getClientWorkspace(uid: string, email: string) {
       intakeSpecs: specs,
     };
   } catch (error) {
+    if (isSqlConnectionError(error)) {
+      return buildFallbackWorkspace();
+    }
     console.error('Failed to load client workspace:', error);
     throw new Error('Unable to load client advisory workspace.', { cause: error });
   }
@@ -376,6 +598,32 @@ export async function updateClientMetric(
   metricId: number,
   updates: { isCompliant?: boolean; remediationNote?: string }
 ) {
+  const fallbackUpdate = () => {
+    const client = fallbackStore.clients.find((c) => c.uid === uid);
+    if (!client) throw new Error('Client profile not found.');
+    const metric = fallbackStore.complianceMetrics.find(
+      (m) => m.id === metricId && m.clientId === client.id
+    );
+    if (!metric) throw new Error('Compliance metric not found for this client.');
+    if (typeof updates.isCompliant === 'boolean') metric.isCompliant = updates.isCompliant;
+    if (typeof updates.remediationNote === 'string') metric.remediationNote = updates.remediationNote;
+    metric.updatedAt = new Date();
+    const allMetrics = fallbackStore.complianceMetrics.filter((m) => m.clientId === client.id);
+    const compliantCount = allMetrics.filter((m) => m.isCompliant).length;
+    const score = allMetrics.length > 0 ? Math.round((compliantCount / allMetrics.length) * 100) : 0;
+    for (const a of fallbackStore.audits) {
+      if (a.clientId === client.id) {
+        a.overallScore = score;
+        a.updatedAt = new Date();
+      }
+    }
+    return { metric, overallScore: score };
+  };
+
+  if (!isSqlConfigured()) {
+    return fallbackUpdate();
+  }
+
   try {
     const clientRows = await db.select().from(clients).where(eq(clients.uid, uid));
     const client = clientRows[0];
@@ -412,6 +660,9 @@ export async function updateClientMetric(
 
     return { metric: updated[0], overallScore: score };
   } catch (error) {
+    if (isSqlConnectionError(error)) {
+      return fallbackUpdate();
+    }
     console.error('Failed to update compliance metric:', error);
     throw new Error('Failed to update compliance control status.', { cause: error });
   }
@@ -428,6 +679,41 @@ export async function upsertClientAdr(
     markdownContent: string;
   }
 ) {
+  const fallbackUpsertAdr = () => {
+    const client = fallbackStore.clients.find((c) => c.uid === uid);
+    if (!client) throw new Error('Client profile not found.');
+    const now = new Date();
+    if (payload.id) {
+      const target = fallbackStore.adrs.find(
+        (d) => d.id === payload.id && d.clientId === client.id
+      );
+      if (!target) throw new Error('Document not found for client.');
+      target.docType = payload.docType;
+      target.docNumber = payload.docNumber;
+      target.title = payload.title;
+      target.status = payload.status;
+      target.markdownContent = payload.markdownContent;
+      target.updatedAt = now;
+      return target;
+    }
+    const created: AdrRow = {
+      id: genFallbackId(),
+      clientId: client.id,
+      docType: payload.docType,
+      docNumber: payload.docNumber,
+      title: payload.title,
+      status: payload.status,
+      markdownContent: payload.markdownContent,
+      updatedAt: now,
+    };
+    fallbackStore.adrs.push(created);
+    return created;
+  };
+
+  if (!isSqlConfigured()) {
+    return fallbackUpsertAdr();
+  }
+
   try {
     const clientRows = await db.select().from(clients).where(eq(clients.uid, uid));
     const client = clientRows[0];
@@ -464,6 +750,9 @@ export async function upsertClientAdr(
 
     return inserted[0];
   } catch (error) {
+    if (isSqlConnectionError(error)) {
+      return fallbackUpsertAdr();
+    }
     console.error('Failed to save ADR/SSD document:', error);
     throw new Error('Failed to save governance document.', { cause: error });
   }
@@ -482,6 +771,46 @@ export async function upsertClientSyncAgenda(
     loomSummaryUrl: string;
   }
 ) {
+  const fallbackUpsertAgenda = () => {
+    const client = fallbackStore.clients.find((c) => c.uid === uid);
+    if (!client) throw new Error('Client profile not found.');
+    const now = new Date();
+    if (payload.id) {
+      const target = fallbackStore.syncAgendas.find(
+        (s) => s.id === payload.id && s.clientId === client.id
+      );
+      if (!target) throw new Error('Sync agenda not found for client.');
+      target.syncDate = payload.syncDate;
+      target.timeWindow = payload.timeWindow;
+      target.architectName = payload.architectName;
+      target.agendaTitle = payload.agendaTitle;
+      target.preReadChecklist = payload.preReadChecklist;
+      target.decisionLogMarkdown = payload.decisionLogMarkdown;
+      target.loomSummaryUrl = payload.loomSummaryUrl;
+      target.updatedAt = now;
+      return target;
+    }
+    const created: SyncAgendaRow = {
+      id: genFallbackId(),
+      clientId: client.id,
+      syncDate: payload.syncDate,
+      timeWindow: payload.timeWindow,
+      architectName: payload.architectName,
+      agendaTitle: payload.agendaTitle,
+      preReadChecklist: payload.preReadChecklist,
+      decisionLogMarkdown: payload.decisionLogMarkdown,
+      loomSummaryUrl: payload.loomSummaryUrl,
+      createdAt: now,
+      updatedAt: now,
+    };
+    fallbackStore.syncAgendas.push(created);
+    return created;
+  };
+
+  if (!isSqlConfigured()) {
+    return fallbackUpsertAgenda();
+  }
+
   try {
     const clientRows = await db.select().from(clients).where(eq(clients.uid, uid));
     const client = clientRows[0];
@@ -522,12 +851,24 @@ export async function upsertClientSyncAgenda(
 
     return inserted[0];
   } catch (error) {
+    if (isSqlConnectionError(error)) {
+      return fallbackUpsertAgenda();
+    }
     console.error('Failed to save sync agenda:', error);
     throw new Error('Failed to save weekly strategic sync agenda.', { cause: error });
   }
 }
 
 export async function getPublicCapacitySummary() {
+  const getFallbackCapacity = () => {
+    const activeCount = fallbackStore.retainers.filter((r) => r.status === 'active').length;
+    return computeCapacitySummary(activeCount);
+  };
+
+  if (!isSqlConfigured()) {
+    return getFallbackCapacity();
+  }
+
   try {
     const countRows = await db
       .select({ count: sql<number>`count(*)::int` })
@@ -535,27 +876,12 @@ export async function getPublicCapacitySummary() {
       .where(eq(retainers.status, 'active'));
 
     const dbActiveCount = countRows[0]?.count ?? 0;
-    const filledSlots = Math.min(MAX_RETAINER_SLOTS, BASELINE_RESERVED_SLOTS + dbActiveCount);
-    const availableSlots = Math.max(0, MAX_RETAINER_SLOTS - filledSlots);
-
-    return {
-      maxSlots: MAX_RETAINER_SLOTS,
-      filledSlots,
-      availableSlots,
-      dbActiveCount,
-      weeklyHoursCap: '20-25 hrs/week',
-      label: `Active Retainer Slots: ${availableSlots} / ${MAX_RETAINER_SLOTS} Available`,
-    };
+    return computeCapacitySummary(dbActiveCount);
   } catch (error) {
-    console.error('Failed to query retainer capacity:', error);
-    return {
-      maxSlots: MAX_RETAINER_SLOTS,
-      filledSlots: 3,
-      availableSlots: 1,
-      dbActiveCount: 1,
-      weeklyHoursCap: '20-25 hrs/week',
-      label: 'Active Retainer Slots: 1 / 4 Available',
-    };
+    if (!isSqlConnectionError(error)) {
+      console.error('Failed to query retainer capacity:', error);
+    }
+    return getFallbackCapacity();
   }
 }
 
@@ -565,6 +891,49 @@ export async function activateClientRetainer(
   stripeSessionId?: string,
   stripeSubscriptionId?: string
 ) {
+  const fallbackActivate = () => {
+    const client = fallbackGetOrCreateClient(uid, email);
+    fallbackSeedClientWorkspaceIfEmpty(client.id);
+    const activeCount = fallbackStore.retainers.filter((r) => r.status === 'active').length;
+    const capacity = computeCapacitySummary(activeCount);
+    const existing = fallbackStore.retainers
+      .filter((r) => r.clientId === client.id)
+      .sort((a, b) => b.id - a.id)[0];
+
+    if (existing?.status !== 'active' && capacity.availableSlots <= 0) {
+      throw new Error('Capacity Cap Reached: All 4 concurrent retainer slots are currently filled.');
+    }
+
+    const now = new Date();
+    if (existing) {
+      existing.status = 'active';
+      existing.monthlyAmountUsd = 7500;
+      existing.stripeSessionId = stripeSessionId || existing.stripeSessionId;
+      existing.stripeSubscriptionId = stripeSubscriptionId || existing.stripeSubscriptionId;
+      existing.activatedAt = existing.activatedAt || now;
+      existing.updatedAt = now;
+      return existing;
+    }
+
+    const created: RetainerRow = {
+      id: genFallbackId(),
+      clientId: client.id,
+      status: 'active',
+      monthlyAmountUsd: 7500,
+      cadenceWindow: 'Async-by-Default + Thursdays 14:00 UTC (60m Sync)',
+      stripeSessionId: stripeSessionId || null,
+      stripeSubscriptionId: stripeSubscriptionId || null,
+      activatedAt: now,
+      updatedAt: now,
+    };
+    fallbackStore.retainers.push(created);
+    return created;
+  };
+
+  if (!isSqlConfigured()) {
+    return fallbackActivate();
+  }
+
   try {
     const client = await getOrCreateClient(uid, email);
     await seedClientWorkspaceIfEmpty(client.id);
@@ -612,6 +981,9 @@ export async function activateClientRetainer(
 
     return inserted[0];
   } catch (error: any) {
+    if (isSqlConnectionError(error)) {
+      return fallbackActivate();
+    }
     console.error('Failed to activate retainer:', error);
     throw new Error(error?.message || 'Failed to activate monthly retainer.', { cause: error });
   }
@@ -622,6 +994,27 @@ export async function markPilotAuditPurchased(
   email: string,
   stripeSessionId: string
 ) {
+  const fallbackMarkPurchased = () => {
+    const client = fallbackGetOrCreateClient(uid, email);
+    fallbackSeedClientWorkspaceIfEmpty(client.id);
+    const existing = fallbackStore.audits
+      .filter((a) => a.clientId === client.id)
+      .sort((a, b) => b.id - a.id)[0];
+    if (existing) {
+      const now = new Date();
+      existing.status = 'active';
+      existing.stripeSessionId = stripeSessionId;
+      existing.purchasedAt = now;
+      existing.updatedAt = now;
+      return existing;
+    }
+    return null;
+  };
+
+  if (!isSqlConfigured()) {
+    return fallbackMarkPurchased();
+  }
+
   try {
     const client = await getOrCreateClient(uid, email);
     await seedClientWorkspaceIfEmpty(client.id);
@@ -647,6 +1040,9 @@ export async function markPilotAuditPurchased(
     }
     return null;
   } catch (error) {
+    if (isSqlConnectionError(error)) {
+      return fallbackMarkPurchased();
+    }
     console.error('Failed to record pilot audit checkout:', error);
     throw new Error('Failed to record pilot audit status.', { cause: error });
   }
@@ -662,6 +1058,31 @@ export async function saveBottleneckAssessment(payload: {
   recommendedTier: string;
   criticalGaps: string[];
 }) {
+  const fallbackSaveAssessment = () => {
+    let clientId: number | null = null;
+    if (payload.uid && payload.email) {
+      const client = fallbackGetOrCreateClient(payload.uid, payload.email, payload.organizationName);
+      clientId = client.id;
+    }
+    const created: BottleneckAssessmentRow = {
+      id: genFallbackId(),
+      clientId,
+      sessionKey: payload.sessionKey,
+      organizationName: payload.organizationName,
+      answers: payload.answers,
+      readinessScore: payload.readinessScore,
+      recommendedTier: payload.recommendedTier,
+      criticalGaps: payload.criticalGaps,
+      createdAt: new Date(),
+    };
+    fallbackStore.bottleneckAssessments.unshift(created);
+    return created;
+  };
+
+  if (!isSqlConfigured()) {
+    return fallbackSaveAssessment();
+  }
+
   try {
     let clientId: number | null = null;
     if (payload.uid && payload.email) {
@@ -684,6 +1105,9 @@ export async function saveBottleneckAssessment(payload: {
 
     return inserted[0];
   } catch (error) {
+    if (isSqlConnectionError(error)) {
+      return fallbackSaveAssessment();
+    }
     console.error('Failed to save bottleneck assessment:', error);
     throw new Error('Failed to persist bottleneck assessment.', { cause: error });
   }
@@ -702,6 +1126,39 @@ export async function createClientComplianceMetric(
     remediationNote: string;
   }
 ) {
+  const fallbackCreateMetric = () => {
+    const client = fallbackGetOrCreateClient(uid, email);
+    fallbackSeedClientWorkspaceIfEmpty(client.id);
+    const created: ComplianceMetricRow = {
+      id: genFallbackId(),
+      clientId: client.id,
+      framework: payload.framework,
+      controlCode: payload.controlCode,
+      controlTitle: payload.controlTitle,
+      category: payload.category,
+      severity: payload.severity,
+      rpoRtoImpact: payload.rpoRtoImpact,
+      isCompliant: false,
+      remediationNote: payload.remediationNote,
+      updatedAt: new Date(),
+    };
+    fallbackStore.complianceMetrics.push(created);
+    const allMetrics = fallbackStore.complianceMetrics.filter((m) => m.clientId === client.id);
+    const compliantCount = allMetrics.filter((m) => m.isCompliant).length;
+    const score = allMetrics.length > 0 ? Math.round((compliantCount / allMetrics.length) * 100) : 0;
+    for (const a of fallbackStore.audits) {
+      if (a.clientId === client.id) {
+        a.overallScore = score;
+        a.updatedAt = new Date();
+      }
+    }
+    return { metric: created, overallScore: score };
+  };
+
+  if (!isSqlConfigured()) {
+    return fallbackCreateMetric();
+  }
+
   try {
     const client = await getOrCreateClient(uid, email);
     await seedClientWorkspaceIfEmpty(client.id);
@@ -736,6 +1193,9 @@ export async function createClientComplianceMetric(
 
     return { metric: inserted[0], overallScore: score };
   } catch (error) {
+    if (isSqlConnectionError(error)) {
+      return fallbackCreateMetric();
+    }
     console.error('Failed to create custom remediation control:', error);
     throw new Error('Failed to add custom remediation item.', { cause: error });
   }
@@ -754,6 +1214,35 @@ export async function saveClientIntakeSpec(
     readinessPercent: number;
   }
 ) {
+  const fallbackSaveIntake = () => {
+    const client = fallbackGetOrCreateClient(uid, email, payload.organizationName);
+    const now = new Date();
+    client.organizationName = payload.organizationName;
+    client.primaryCloud = payload.primaryCloud;
+    client.rpoTarget = payload.rpoTarget;
+    client.repoUrl = payload.repoUrl;
+    client.updatedAt = now;
+    const created: IntakeSpecRow = {
+      id: genFallbackId(),
+      clientId: client.id,
+      organizationName: payload.organizationName,
+      primaryCloud: payload.primaryCloud,
+      rpoTarget: payload.rpoTarget,
+      repoUrl: payload.repoUrl,
+      complianceFlags: payload.complianceFlags,
+      notes: payload.notes,
+      readinessPercent: payload.readinessPercent,
+      createdAt: now,
+      updatedAt: now,
+    };
+    fallbackStore.intakeSpecs.unshift(created);
+    return created;
+  };
+
+  if (!isSqlConfigured()) {
+    return fallbackSaveIntake();
+  }
+
   try {
     const client = await getOrCreateClient(uid, email, payload.organizationName);
 
@@ -784,20 +1273,32 @@ export async function saveClientIntakeSpec(
 
     return inserted[0];
   } catch (error) {
+    if (isSqlConnectionError(error)) {
+      return fallbackSaveIntake();
+    }
     console.error('Failed to persist Schedule A intake spec:', error);
     throw new Error('Failed to save Schedule A intake specification.', { cause: error });
   }
 }
 
 export async function listAdvisoryBookings() {
+  if (!isSqlConfigured()) {
+    return [...fallbackStore.advisoryBookings].sort(
+      (a, b) => b.bookedAt.getTime() - a.bookedAt.getTime()
+    );
+  }
   try {
     return await db
       .select()
       .from(advisoryBookings)
       .orderBy(desc(advisoryBookings.bookedAt));
   } catch (error) {
-    console.error('Failed to list advisory bookings:', error);
-    return [];
+    if (!isSqlConnectionError(error)) {
+      console.error('Failed to list advisory bookings:', error);
+    }
+    return [...fallbackStore.advisoryBookings].sort(
+      (a, b) => b.bookedAt.getTime() - a.bookedAt.getTime()
+    );
   }
 }
 
@@ -817,6 +1318,37 @@ export async function saveAdvisoryBooking(payload: {
   repoUrl: string;
   meetingUrl: string;
 }) {
+  const fallbackSaveBooking = () => {
+    let clientId: number | null = null;
+    if (payload.uid && payload.email) {
+      const client = fallbackGetOrCreateClient(payload.uid, payload.email, payload.orgName);
+      clientId = client.id;
+    }
+    const created: AdvisoryBookingRow = {
+      id: genFallbackId(),
+      bookingCode: payload.bookingCode,
+      clientId,
+      architectId: payload.architectId,
+      architectName: payload.architectName,
+      syncDate: payload.syncDate,
+      timeSlot: payload.timeSlot,
+      timezone: payload.timezone,
+      orgName: payload.orgName,
+      attendeeEmail: payload.attendeeEmail,
+      topic: payload.topic,
+      notes: payload.notes,
+      repoUrl: payload.repoUrl,
+      meetingUrl: payload.meetingUrl,
+      bookedAt: new Date(),
+    };
+    fallbackStore.advisoryBookings.unshift(created);
+    return created;
+  };
+
+  if (!isSqlConfigured()) {
+    return fallbackSaveBooking();
+  }
+
   try {
     let clientId: number | null = null;
     if (payload.uid && payload.email) {
@@ -845,6 +1377,9 @@ export async function saveAdvisoryBooking(payload: {
 
     return inserted[0];
   } catch (error) {
+    if (isSqlConnectionError(error)) {
+      return fallbackSaveBooking();
+    }
     console.error('Failed to save advisory booking:', error);
     throw new Error('Failed to persist advisory booking to Cloud SQL.', { cause: error });
   }

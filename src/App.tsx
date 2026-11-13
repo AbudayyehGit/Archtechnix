@@ -31,6 +31,8 @@ import {
   IntakeValidationThresholds,
   ModalPayload,
   RequirementSpec,
+  ScopeBoundaryItem,
+  ScopeTaskStatus,
   SkillEvolutionLog,
   SystemSteadyState,
 } from './types';
@@ -60,10 +62,12 @@ import {
   DEFAULT_INTAKE_THRESHOLDS,
   DEFAULT_REQUIREMENT_SPECS,
   DEFAULT_SKILL_BLUEPRINT,
+  evaluateAndAdaptSkill,
 } from './lib/governanceEngine';
 
 const STORAGE_KEY = 'omniops_architechnix_state_v2';
 const GOVERNANCE_STORAGE_KEY = 'archtechnix_governance_v1';
+const SCOPE_STORAGE_KEY = 'archtechnix_scope_boundaries_v1';
 
 type PortalTab = 'funnel' | 'audit' | 'retainer';
 
@@ -116,6 +120,8 @@ export default function App() {
     DEFAULT_SKILL_BLUEPRINT
   );
   const [governanceHydrated, setGovernanceHydrated] = useState<boolean>(false);
+  const [scopeBoundaries, setScopeBoundaries] = useState<ScopeBoundaryItem[]>([]);
+  const [scopeHydrated, setScopeHydrated] = useState<boolean>(false);
 
   // Check for Stripe Checkout return parameters (?status=success&session_id=...)
   useEffect(() => {
@@ -358,10 +364,102 @@ Operational Pipeline:
     }).catch(() => {});
   };
 
+  // Hydrate & persist ScopeBoundaryLog items (localStorage + Express API)
+  useEffect(() => {
+    let active = true;
+    try {
+      const savedScope = localStorage.getItem(SCOPE_STORAGE_KEY);
+      if (savedScope) {
+        const parsed = JSON.parse(savedScope);
+        if (Array.isArray(parsed)) setScopeBoundaries(parsed);
+      }
+    } catch {
+      // Ignore storage error
+    }
+
+    fetch('/api/scope-boundaries')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !data || !Array.isArray(data.items)) return;
+        setScopeBoundaries((prev) => {
+          const seen = new Set(prev.map((i) => i.id));
+          const merged = [...prev];
+          for (const item of data.items as ScopeBoundaryItem[]) {
+            if (!seen.has(item.id)) merged.push(item);
+          }
+          return merged.length > 0 ? merged : data.items;
+        });
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setScopeHydrated(true);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!scopeHydrated) return;
+    try {
+      localStorage.setItem(SCOPE_STORAGE_KEY, JSON.stringify(scopeBoundaries));
+    } catch {
+      // Ignore storage error
+    }
+  }, [scopeBoundaries, scopeHydrated]);
+
+  const handleAddScopeItem = (item: ScopeBoundaryItem) => {
+    setScopeBoundaries((prev) => [item, ...prev]);
+    fetch('/api/scope-boundaries', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(item),
+    }).catch(() => {});
+  };
+
+  const handleUpdateScopeStatus = (id: string, status: ScopeTaskStatus) => {
+    setScopeBoundaries((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, status } : item))
+    );
+    fetch(`/api/scope-boundaries/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    }).catch(() => {});
+  };
+
+  const handleEscalateOutOfScopeToSkillBuilder = (item: ScopeBoundaryItem) => {
+    const outOfScopeCount =
+      scopeBoundaries.filter((s) => s.classification === 'out_of_scope_retainer_candidate').length +
+      1;
+    const outcome = evaluateAndAdaptSkill(
+      {
+        skillName: `Scope-Boundary Escalation: ${item.title.slice(0, 48)}`,
+        sprintType: 'pilot_audit_14d',
+        deliveryDays: 14,
+        outOfScopeFlags: outOfScopeCount,
+        architectVelocityScore: 92,
+        rpoVerifiedMinutes: 12,
+        clientRequirementDelta: `out_of_scope_retainer_candidate logged (${item.requestedHours}h): ${item.rationale}`,
+      },
+      intakeThresholds,
+      adaptedBlueprint
+    );
+    handleRecordEvolution(
+      outcome.logEntry,
+      outcome.nextThresholds,
+      outcome.nextBlueprint,
+      outcome.didAutoAdapt
+    );
+  };
+
   const handleResetData = () => {
     if (window.confirm('Reset all saved wizard progress, quiz answers, and intake drafts?')) {
       localStorage.removeItem(STORAGE_KEY);
       localStorage.removeItem(GOVERNANCE_STORAGE_KEY);
+      localStorage.removeItem(SCOPE_STORAGE_KEY);
+      localStorage.removeItem('archtechnix_sprint_start_v1');
       window.location.reload();
     }
   };
@@ -872,6 +970,7 @@ ${JSON.stringify(webhookEvent, null, 2)}
                     capacity={capacity}
                     isCheckingOut={isCheckingOut}
                     onLaunchPilotCheckout={() => handleStripeCheckout('diagnostic')}
+                    onBookCalSync={() => navigateToModule('retainer', 'advisory-availability-section')}
                     onShowToast={showToast}
                     onSyncFindingsToIntake={(summaryNotes, recommendedTier) => {
                       setSelectedTier(recommendedTier);
@@ -1043,7 +1142,14 @@ ${JSON.stringify(webhookEvent, null, 2)}
                   <PilotAuditDashboard
                     isCheckingOut={isCheckingOut}
                     onLaunchPilotCheckout={() => handleStripeCheckout('diagnostic')}
+                    onActivateRetainerCheckout={() => handleStripeCheckout('retainer')}
                     onShowToast={showToast}
+                    intakeData={intakeData}
+                    scopeBoundaries={scopeBoundaries}
+                    onAddScopeItem={handleAddScopeItem}
+                    onUpdateScopeStatus={handleUpdateScopeStatus}
+                    onEscalateOutOfScopeToSkillBuilder={handleEscalateOutOfScopeToSkillBuilder}
+                    capacity={capacity}
                   />
                 </div>
               </section>
