@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   Briefcase, 
   GraduationCap, 
@@ -21,6 +21,7 @@ import {
   CheckCircle2,
   Sun,
   Moon,
+  Monitor,
   Calendar
 } from 'lucide-react';
 import { PRICING_TIERS, OPERATIONAL_DOCS, PROTOTYPE_PORTFOLIO, CURRICULUM_PHASES } from './data';
@@ -167,14 +168,64 @@ Operational Pipeline:
     }
   }, [idToken, refreshCapacity, refreshWorkspace]);
 
-  // Theme Toggle: Defaults to 'dark' (Inverted Aesthetic), supports 'light' (High-Contrast)
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+  // Theme Settings: Supports 'system' (Sync with System Theme), 'dark' (Archtechnix Dark), and 'light' (High-Contrast Light)
+  const [themeMode, setThemeMode] = useState<'system' | 'dark' | 'light'>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('omniops_theme');
-      if (saved === 'light' || saved === 'dark') return saved;
+      const savedMode = localStorage.getItem('omniops_theme_mode');
+      if (savedMode === 'system' || savedMode === 'dark' || savedMode === 'light') {
+        return savedMode;
+      }
+      const legacy = localStorage.getItem('omniops_theme');
+      if (legacy === 'light' || legacy === 'dark') return legacy;
     }
     return 'dark';
   });
+
+  const [osPrefersDark, setOsPrefersDark] = useState<boolean>(() => {
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+    return true;
+  });
+
+  const [themeMenuOpen, setThemeMenuOpen] = useState<boolean>(false);
+  const themeMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    setOsPrefersDark(mediaQuery.matches);
+
+    const handleChange = (event: MediaQueryListEvent) => {
+      setOsPrefersDark(event.matches);
+    };
+
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
+
+  useEffect(() => {
+    if (!themeMenuOpen) return;
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (themeMenuRef.current && !themeMenuRef.current.contains(event.target as Node)) {
+        setThemeMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setThemeMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [themeMenuOpen]);
+
+  const theme: 'dark' | 'light' =
+    themeMode === 'system' ? (osPrefersDark ? 'dark' : 'light') : themeMode;
 
   useEffect(() => {
     const root = document.documentElement;
@@ -186,14 +237,20 @@ Operational Pipeline:
       root.classList.add('light');
     }
     try {
+      localStorage.setItem('omniops_theme_mode', themeMode);
       localStorage.setItem('omniops_theme', theme);
     } catch {
       // LocalStorage fallback
     }
-  }, [theme]);
+  }, [theme, themeMode]);
 
-  const toggleTheme = () => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  const handleToggleSystemThemeSync = () => {
+    setThemeMode((prev) => {
+      if (prev === 'system') {
+        return osPrefersDark ? 'dark' : 'light';
+      }
+      return 'system';
+    });
   };
   useEffect(() => {
     try {
@@ -730,25 +787,116 @@ ${JSON.stringify(webhookEvent, null, 2)}
 
             <PWAInstallButton />
 
-            {/* High-Contrast / Inverted Theme Toggle Button */}
-            <button
-              onClick={toggleTheme}
-              aria-label={theme === 'dark' ? 'Switch to High-Contrast Light Mode' : 'Switch to Inverted Dark Mode'}
-              title={theme === 'dark' ? 'Switch to High-Contrast Light Mode' : 'Switch to Inverted Dark Mode'}
-              className="min-h-[44px] min-w-[44px] px-2.5 rounded-xl flex items-center justify-center space-x-1.5 text-xs font-mono font-medium transition-all duration-200 bg-slate-900 border border-slate-800 hover:border-orange-500/50 text-slate-300 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 shadow-sm"
-            >
-              {theme === 'dark' ? (
-                <>
-                  <Sun className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span className="hidden xl:inline text-[11px] text-amber-300/90">Light</span>
-                </>
-              ) : (
-                <>
-                  <Moon className="w-4 h-4 text-indigo-500 shrink-0" />
-                  <span className="hidden xl:inline text-[11px] text-indigo-600">Dark</span>
-                </>
+            {/* Theme Settings Control with Sync with System Theme Toggle */}
+            <div ref={themeMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setThemeMenuOpen((prev) => !prev)}
+                aria-expanded={themeMenuOpen}
+                aria-haspopup="dialog"
+                aria-label="Theme settings"
+                title="Theme settings"
+                className="min-h-[44px] min-w-[44px] px-2.5 rounded-xl flex items-center justify-center space-x-1.5 text-xs font-mono font-medium transition-all duration-200 bg-slate-900 border border-slate-800 hover:border-orange-500/50 text-slate-300 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 shadow-sm"
+              >
+                {themeMode === 'system' ? (
+                  <>
+                    <Monitor className="w-4 h-4 text-cyan-400 shrink-0" />
+                    <span className="hidden xl:inline text-[11px] text-cyan-300">Auto</span>
+                  </>
+                ) : theme === 'dark' ? (
+                  <>
+                    <Sun className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span className="hidden xl:inline text-[11px] text-amber-300/90">Dark</span>
+                  </>
+                ) : (
+                  <>
+                    <Moon className="w-4 h-4 text-indigo-500 shrink-0" />
+                    <span className="hidden xl:inline text-[11px] text-indigo-600">Light</span>
+                  </>
+                )}
+              </button>
+
+              {themeMenuOpen && (
+                <div
+                  role="dialog"
+                  aria-label="Theme preferences"
+                  className="absolute right-0 mt-2 w-72 rounded-xl bg-slate-900 border border-slate-800 shadow-2xl p-4 z-50 space-y-3"
+                >
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                    <div>
+                      <div className="text-xs font-bold text-white">Theme Settings</div>
+                      <div className="text-[11px] font-mono text-slate-400">
+                        Active: {theme === 'dark' ? 'Archtechnix Dark' : 'High-Contrast Light'}
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      OS: {osPrefersDark ? 'Dark' : 'Light'}
+                    </span>
+                  </div>
+
+                  {/* Sync with System Theme Toggle */}
+                  <div className="flex items-center justify-between gap-3 py-1">
+                    <div>
+                      <div className="text-xs font-semibold text-white">Sync with System Theme</div>
+                      <div className="text-[11px] text-slate-400">
+                        Uses OS prefers-color-scheme
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={themeMode === 'system'}
+                      aria-label="Sync with System Theme"
+                      onClick={handleToggleSystemThemeSync}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
+                        themeMode === 'system' ? 'bg-orange-500' : 'bg-slate-700'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
+                          themeMode === 'system' ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Manual Mode Selector */}
+                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setThemeMode('dark');
+                        setThemeMenuOpen(false);
+                      }}
+                      className={`px-3 py-2 rounded-lg border text-xs font-mono flex items-center justify-center space-x-1.5 transition-colors ${
+                        themeMode === 'dark'
+                          ? 'bg-orange-500/15 border-orange-500/50 text-orange-400 font-bold'
+                          : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                      }`}
+                    >
+                      <Moon className="w-3.5 h-3.5" />
+                      <span>Dark</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setThemeMode('light');
+                        setThemeMenuOpen(false);
+                      }}
+                      className={`px-3 py-2 rounded-lg border text-xs font-mono flex items-center justify-center space-x-1.5 transition-colors ${
+                        themeMode === 'light'
+                          ? 'bg-orange-500/15 border-orange-500/50 text-orange-500 font-bold'
+                          : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                      }`}
+                    >
+                      <Sun className="w-3.5 h-3.5" />
+                      <span>Light</span>
+                    </button>
+                  </div>
+                </div>
               )}
-            </button>
+            </div>
 
             {/* Reset Browser State Button */}
             <button
@@ -1183,6 +1331,8 @@ ${JSON.stringify(webhookEvent, null, 2)}
                     isCheckingOut={isCheckingOut}
                     onActivateRetainerCheckout={() => handleStripeCheckout('retainer')}
                     onShowToast={showToast}
+                    intakeData={intakeData}
+                    steadyStates={steadyStates}
                   />
                 </div>
               </section>

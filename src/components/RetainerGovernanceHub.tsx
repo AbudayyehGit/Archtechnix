@@ -7,6 +7,7 @@ import {
   Edit3,
   Eye,
   FileCode2,
+  FileText,
   Plus,
   Save,
   Shield,
@@ -14,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { downloadArchitectureDossierPdf } from '../lib/dossierPdf';
 import {
   DEFAULT_OFFLINE_ADRS,
   DEFAULT_OFFLINE_AGENDA,
@@ -22,12 +24,16 @@ import {
   type OfflinePreReadItem,
   type OfflineSyncAgenda,
 } from '../lib/offlineDb';
+import type { IntakeSpecData, SystemSteadyState } from '../types';
+import { ClientActivityStream } from './ClientActivityStream';
 import { MarkdownViewer } from './MarkdownViewer';
 
 interface RetainerGovernanceHubProps {
   onActivateRetainerCheckout: () => void;
   onShowToast: (msg: string) => void;
   isCheckingOut?: boolean;
+  intakeData?: IntakeSpecData;
+  steadyStates?: SystemSteadyState[];
 }
 
 const DOC_CATEGORIES: Array<{
@@ -44,6 +50,8 @@ export const RetainerGovernanceHub: React.FC<RetainerGovernanceHubProps> = ({
   onActivateRetainerCheckout,
   onShowToast,
   isCheckingOut = false,
+  intakeData,
+  steadyStates = [],
 }) => {
   const { user, idToken, workspace, capacity, signInWithGoogle, refreshWorkspace } = useAuth();
 
@@ -256,6 +264,28 @@ Documents Included: ${docs.map((d) => d.docNumber).join(', ')}
     onShowToast('All SSDs, ADRs, Data Flow & Risk documents exported (.md)!');
   };
 
+  const handleDownloadArchitectureDossier = () => {
+    try {
+      const effectiveIntake: IntakeSpecData = intakeData || {
+        org: 'Apex FinTech Systems',
+        cloud: 'AWS (EKS, Aurora, KMS)',
+        rpo: 'Sub-15 Minute (Zero Data Loss)',
+        repo: 'https://github.com/apex-fintech/core-mesh',
+        compliance: { gdpr: true, soc2: true, nist: false },
+        notes: 'Decoupled event mesh audit, OPA policy generation, and sub-15m RTO disaster recovery validation.',
+      };
+      const filename = downloadArchitectureDossierPdf({
+        intakeData: effectiveIntake,
+        steadyStates,
+        docs,
+        capacityLabel: capacity.label,
+      });
+      onShowToast(`Architecture Dossier PDF downloaded (${filename})`);
+    } catch (err: any) {
+      onShowToast(err?.message || 'Unable to generate Architecture Dossier PDF.');
+    }
+  };
+
   const handleTogglePreRead = (itemId: string) => {
     const nextChecklist = agenda.preReadChecklist.map((item) =>
       item.id === itemId ? { ...item, completed: !item.completed } : item
@@ -346,6 +376,15 @@ Documents Included: ${docs.map((d) => d.docNumber).join(', ')}
         </div>
 
         <div className="flex flex-wrap items-center gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={handleDownloadArchitectureDossier}
+            className="px-3.5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-orange-500/40 text-orange-300 font-mono text-xs font-semibold flex items-center space-x-1.5 transition-colors"
+          >
+            <FileText className="w-4 h-4 text-orange-400" />
+            <span>Download Architecture Dossier</span>
+          </button>
+
           <button
             type="button"
             onClick={handleExportGovernanceSuite}
@@ -647,6 +686,9 @@ Documents Included: ${docs.map((d) => d.docNumber).join(', ')}
           </button>
         </div>
       </div>
+
+      {/* Live Client Repository Activity Stream */}
+      <ClientActivityStream repoUrl={intakeData?.repo} onShowToast={onShowToast} />
 
       {/* Create New ADR / Governance Document Modal */}
       {showNewDocModal && (
