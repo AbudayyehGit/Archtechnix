@@ -247,3 +247,48 @@ html.light select {
     font-size: 0.75rem !important;
   }
 }
+
+/* High-contrast Print Preview white-paper protection */
+.print-paper-sheet {
+  color-scheme: light;
+}
+
+.print-paper-banner {
+  background-color: #020617 !important;
+}
+
+.print-paper-banner .print-banner-title,
+html.light .print-paper-sheet .print-paper-banner .print-banner-title {
+  color: #ffffff !important;
+}
+
+.print-paper-banner .print-banner-stamp,
+html.light .print-paper-sheet .print-paper-banner .print-banner-stamp {
+  color: #cbd5e1 !important;
+}
+
+html.light .print-paper-sheet .text-slate-500 {
+  color: #475569 !important;
+}
+
+html.light .print-paper-sheet .text-slate-600 {
+  color: #334155 !important;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-paper-sheet,
+  .print-paper-sheet * {
+    visibility: visible;
+  }
+  .print-paper-sheet {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    box-shadow: none !important;
+    border: none !important;
+  }
+}

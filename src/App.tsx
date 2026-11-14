@@ -76,7 +76,8 @@ const SCOPE_STORAGE_KEY = 'archtechnix_scope_boundaries_v1';
 type PortalTab = 'funnel' | 'audit' | 'retainer';
 
 export default function App() {
-  const { user, idToken, capacity, refreshWorkspace, refreshCapacity } = useAuth();
+  const { user, idToken, workspace, capacity, refreshWorkspace, refreshCapacity } = useAuth();
+  const retainerActive = workspace?.retainer?.status === 'active';
   const [mode, setMode] = useState<'business' | 'academy'>('business');
   const [portalTab, setPortalTab] = useState<PortalTab>('funnel');
   const [currentPhase, setCurrentPhase] = useState<number>(1);
@@ -999,7 +1000,17 @@ ${JSON.stringify(webhookEvent, null, 2)}
                 <span className="text-slate-700">|</span>
                 <button
                   onClick={() => navigateToModule('retainer', 'advisory-availability-section')}
-                  className="text-emerald-400 hover:text-emerald-300 flex items-center space-x-1 transition-colors"
+                  data-retainer-active={retainerActive ? 'true' : 'false'}
+                  title={
+                    retainerActive
+                      ? 'Active Retainer · Book your weekly 1-hour strategic sync'
+                      : 'Book 1-Hr Strategic Sync'
+                  }
+                  className={`flex items-center space-x-1.5 transition-all ${
+                    retainerActive
+                      ? 'px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 shadow-[0_0_12px_rgba(16,185,129,0.28)] animate-pulse'
+                      : 'text-emerald-400 hover:text-emerald-300'
+                  }`}
                 >
                   <Calendar className="w-3.5 h-3.5" />
                   <span>Book 1-Hr Sync</span>
