@@ -1,11 +1,17 @@
 import express from 'express';
 import type { Request, Response } from 'express';
 import http from 'http';
+import fs from 'fs';
 import dotenv from 'dotenv';
 import Stripe from 'stripe';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { GoogleGenAI, Type } from '@google/genai';
 import { optionalAuth, requireAuth, type AuthRequest } from './src/middleware/auth.ts';
+import {
+  buildDeterministicAuditMarkdown,
+  runUnifiedPipelineNormalization,
+} from './src/lib/pipelineEngine.ts';
 import {
   activateClientRetainer,
   createClientComplianceMetric,
@@ -1127,6 +1133,242 @@ app.patch('/api/scope-boundaries/:id', (req: Request, res: Response) => {
     target.classification = classification;
   }
   return res.json({ success: true, item: target });
+});
+
+// ============================================================================
+// PRODUCTION v2.2: THREE-TIER PIPELINE & TWO-PASS GEMINI SYNTHESIS API
+// ============================================================================
+
+const PIPELINE_SYSTEM_PROMPT =
+  'You are the Principal Systems Architect for Architechnix {∞} (OmniOps Systems). ' +
+  'Synthesize enterprise DevSecOps Pilot Audit deliverables in clear, plain English with zero corporate jargon. ' +
+  'Pass 1 evaluates DB replication telemetry against client RPO/RTO SLAs and exposes Single Points of Failure (SPOFs). ' +
+  'Pass 2 translates normalized findings into prioritized Critical, High, and Medium copy-pasteable Terraform/CLI fixes.';
+
+app.get('/api/pipeline/python-engine', (_req: Request, res: Response) => {
+  try {
+    const enginePath = path.resolve(__dirname, 'architechnix_engine.py');
+    const source = fs.readFileSync(enginePath, 'utf-8');
+    return res.json({
+      success: true,
+      filename: 'architechnix_engine.py',
+      primaryModel: 'gemini-2.5-pro',
+      fallbackModel: 'gemini-2.5-flash',
+      source,
+    });
+  } catch (err: any) {
+    return res.status(404).json({
+      error: err?.message || 'Python reference engine architechnix_engine.py not found',
+    });
+  }
+});
+
+app.post('/api/pipeline/normalize', (req: Request, res: Response) => {
+  try {
+    const { tier1, inventory, telemetry, pipelineState } = req.body || {};
+    if (!tier1 || !inventory || !telemetry) {
+      return res.status(400).json({
+        error: 'tier1, inventory, and telemetry payloads are required.',
+      });
+    }
+    const result = runUnifiedPipelineNormalization({
+      tier1,
+      inventory,
+      telemetry,
+      pipelineState,
+    });
+    const statusCode = result.validationErrors.length > 0 ? 422 : 200;
+    return res.status(statusCode).json(result);
+  } catch (err: any) {
+    return res.status(500).json({
+      error: err?.message || 'Pipeline normalization failed',
+    });
+  }
+});
+
+app.post('/api/pipeline/synthesize', async (req: Request, res: Response) => {
+  try {
+    const { tier1, inventory, telemetry, pipelineState } = req.body || {};
+    if (!tier1 || !inventory || !telemetry) {
+      return res.status(400).json({
+        error: 'tier1, inventory, and telemetry payloads are required.',
+      });
+    }
+
+    const normalized = runUnifiedPipelineNormalization({
+      tier1,
+      inventory,
+      telemetry,
+      pipelineState,
+    });
+
+    if (normalized.validationErrors.length > 0) {
+      return res.status(422).json({
+        success: false,
+        error: normalized.validationErrors.join(' '),
+        normalized,
+      });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    const candidateModels = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-4-hydrogen'];
+    let modelUsed = 'deterministic-offline-synthesizer';
+    let fallbackTriggered = false;
+    let diagnosticNotice = '';
+
+    if (apiKey) {
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+        },
+      });
+
+      const sanitizedSynthesisInput = {
+        targetDomain: tier1.targetDomain,
+        repoUrl: tier1.repoUrl,
+        targetRpoMinutes: tier1.targetRpoMinutes,
+        targetRtoMinutes: tier1.targetRtoMinutes,
+        frameworks: tier1.frameworks,
+        credentialHygiene: normalized.credentialHygiene,
+        dbSlaSummary: normalized.dbSlaSummary,
+        severityCounts: normalized.severityCounts,
+        complianceGapMatrix: normalized.complianceGapMatrix,
+        normalizedFindings: normalized.normalizedFindings,
+        mermaidTopology: normalized.mermaidTopology,
+      };
+
+      const prompt = `Execute Two-Pass Architechnix Pilot Audit synthesis for this scrubbed, deduplicated payload:\n${JSON.stringify(
+        sanitizedSynthesisInput,
+        null,
+        2
+      )}`;
+
+      for (let i = 0; i < candidateModels.length; i += 1) {
+        const currentModel = candidateModels[i];
+        try {
+          const response = await ai.models.generateContent({
+            model: currentModel,
+            contents: prompt,
+            config: {
+              systemInstruction: PIPELINE_SYSTEM_PROMPT,
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  pass1ExecutiveRiskMd: {
+                    type: Type.STRING,
+                    description:
+                      'Markdown analysis evaluating DB replication telemetry against client RPO/RTO SLAs and SPOFs.',
+                  },
+                  pass2RemediationRoadmapMd: {
+                    type: Type.STRING,
+                    description:
+                      'Markdown prioritized Critical/High/Medium Terraform and CLI remediation steps.',
+                  },
+                },
+                required: ['pass1ExecutiveRiskMd', 'pass2RemediationRoadmapMd'],
+              },
+            },
+          });
+
+          const parsed = JSON.parse((response.text ?? '{}').trim()) as {
+            pass1ExecutiveRiskMd?: string;
+            pass2RemediationRoadmapMd?: string;
+          };
+
+          if (parsed.pass1ExecutiveRiskMd && parsed.pass2RemediationRoadmapMd) {
+            modelUsed = currentModel;
+            fallbackTriggered = i > 0;
+            const fullMarkdownReport = `# Architechnix {∞} Pilot Audit & Resilience Deliverable
+
+- **Target Perimeter**: \`${tier1.targetDomain}\`
+- **Scoped Repository**: \`${tier1.repoUrl}\`
+- **Target DR SLA**: < ${tier1.targetRpoMinutes}m RPO / < ${tier1.targetRtoMinutes}m RTO
+- **Ephemeral Credential Status**: Purged (${normalized.credentialHygiene.maskedIamArn})
+- **Synthesized By**: \`${modelUsed}\`${fallbackTriggered ? ' (Graceful Fallback Active)' : ''}
+
+## Pass 1 · Executive Risk & DR Analysis
+${parsed.pass1ExecutiveRiskMd}
+
+## Topology Diagram (Mermaid.js graph TD)
+\`\`\`mermaid
+${normalized.mermaidTopology}
+\`\`\`
+
+## Compliance Gap Matrix
+| Framework | Total Gaps | Critical | High | Medium |
+| :--- | :--- | :--- | :--- | :--- |
+${normalized.complianceGapMatrix
+  .map(
+    (row) =>
+      `| ${row.framework} | ${row.totalGaps} | ${row.criticalCount} | ${row.highCount} | ${row.mediumCount} |`
+  )
+  .join('\n')}
+
+## Pass 2 · Prioritized Remediation Roadmap
+${parsed.pass2RemediationRoadmapMd}
+
+## Human-in-the-Loop QA Gate
+- [ ] Cross-check RPO/RTO failover simulation timing (< ${tier1.targetRpoMinutes}m RPO)
+- [ ] Confirm ephemeral IAM Role External ID & Git PAT purged
+- [ ] Record 15-minute Executive Loom walkthrough & commit to \`system_steady_states\`
+`;
+            return res.json({
+              success: true,
+              normalized,
+              synthesis: {
+                success: true,
+                modelUsed,
+                fallbackTriggered,
+                diagnosticNotice: fallbackTriggered
+                  ? `Primary model throttled or restricted; seamlessly fell back to ${modelUsed}.`
+                  : undefined,
+                pass1ExecutiveRiskMd: parsed.pass1ExecutiveRiskMd,
+                pass2RemediationRoadmapMd: parsed.pass2RemediationRoadmapMd,
+                fullMarkdownReport,
+                statusBanner: 'STATUS: STEADY_STATE_REACHED',
+              },
+            });
+          }
+        } catch (modelErr: any) {
+          const code = Number(modelErr?.status || modelErr?.code || 0);
+          diagnosticNotice = `Model ${currentModel} error (${code || 'API'}): ${
+            modelErr?.message || 'Check Gemini API key, project permissions, or billing in Settings > Secrets.'
+          }`;
+          if (i < candidateModels.length - 1) {
+            continue;
+          }
+        }
+      }
+    } else {
+      diagnosticNotice =
+        'GEMINI_API_KEY not configured on server; generated deterministic Two-Pass Markdown report. Configure GEMINI_API_KEY in Settings > Secrets to enable live Gemini 2.5 Pro synthesis.';
+    }
+
+    const fallbackMd = buildDeterministicAuditMarkdown(tier1, normalized, diagnosticNotice);
+    return res.json({
+      success: true,
+      normalized,
+      synthesis: {
+        success: true,
+        modelUsed,
+        fallbackTriggered: Boolean(apiKey),
+        diagnosticNotice,
+        pass1ExecutiveRiskMd: fallbackMd.split('## Topology Diagram')[0],
+        pass2RemediationRoadmapMd:
+          fallbackMd.split('## Pass 2 · Prioritized Remediation Roadmap')[1] || '',
+        fullMarkdownReport: fallbackMd,
+        statusBanner: 'STATUS: STEADY_STATE_REACHED',
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      error: err?.message || 'Audit synthesis pipeline failed',
+    });
+  }
 });
 
 // Health check endpoint

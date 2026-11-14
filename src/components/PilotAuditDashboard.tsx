@@ -28,10 +28,12 @@ import type {
   PreFlightDebtFinding,
   ScopeBoundaryItem,
   ScopeTaskStatus,
+  SystemSteadyState,
 } from '../types';
 import { MarkdownViewer } from './MarkdownViewer';
 import { ScopeBoundaryLog } from './ScopeBoundaryLog';
 import { PreFlightDebtScanner } from './PreFlightDebtScanner';
+import { AuditSynthesisPipeline } from './AuditSynthesisPipeline';
 
 const DEFAULT_ROADMAP_MD = `# 14-Day Pilot Audit: Critical RPO/RTO Remediation Roadmap
 
@@ -64,6 +66,7 @@ interface PilotAuditDashboardProps {
   onAddScopeItem?: (item: ScopeBoundaryItem) => void;
   onUpdateScopeStatus?: (id: string, status: ScopeTaskStatus) => void;
   onEscalateOutOfScopeToSkillBuilder?: (item: ScopeBoundaryItem) => void;
+  onCommitSteadyState?: (state: SystemSteadyState) => void;
   capacity?: CapacitySummary;
 }
 
@@ -95,6 +98,7 @@ export const PilotAuditDashboard: React.FC<PilotAuditDashboardProps> = ({
   onAddScopeItem,
   onUpdateScopeStatus,
   onEscalateOutOfScopeToSkillBuilder,
+  onCommitSteadyState,
   capacity = DEFAULT_FALLBACK_CAPACITY,
 }) => {
   const {
@@ -642,6 +646,13 @@ ${roadmapMarkdown}
         onEscalateOutOfScopeToSkillBuilder={onEscalateOutOfScopeToSkillBuilder}
         onShowToast={onShowToast}
         isCheckingOut={isCheckingOut}
+      />
+
+      {/* Production v2.2 Three-Tier Automated Synthesis Pipeline & Python Engine */}
+      <AuditSynthesisPipeline
+        defaultRepo={intakeData.repo}
+        onShowToast={onShowToast}
+        onCommitSteadyState={onCommitSteadyState}
       />
 
       {/* Main Split: Compliance Readiness Matrix + RPO/RTO Roadmap & Loom Deliverable */}

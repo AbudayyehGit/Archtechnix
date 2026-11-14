@@ -1149,6 +1149,7 @@ ${JSON.stringify(webhookEvent, null, 2)}
                     onAddScopeItem={handleAddScopeItem}
                     onUpdateScopeStatus={handleUpdateScopeStatus}
                     onEscalateOutOfScopeToSkillBuilder={handleEscalateOutOfScopeToSkillBuilder}
+                    onCommitSteadyState={handleCommitSteadyState}
                     capacity={capacity}
                   />
                 </div>

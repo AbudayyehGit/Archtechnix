@@ -183,3 +183,121 @@ export interface PreFlightScanReport {
   rpoTarget: string;
   findings: PreFlightDebtFinding[];
 }
+
+// ============================================================================
+// PRODUCTION v2.2: THREE-TIER AUTOMATED PIPELINE & SYNTHESIS ENGINE
+// ============================================================================
+
+export interface Tier1IntakeParams {
+  iamRoleArn: string;
+  externalId: string;
+  repoUrl: string;
+  gitTokenRef: string;
+  targetDomain: string;
+  apiBaseUrl: string;
+  ownershipAuthorized: boolean;
+  targetRpoMinutes: number;
+  targetRtoMinutes: number;
+  frameworks: Array<'ISO/IEC 27001' | 'SOC 2 Type II' | 'NIST SP 800-207'>;
+}
+
+export interface AssetInventoryPayload {
+  vpcs: string[];
+  loadBalancers: string[];
+  services: string[];
+  databases: string[];
+  replicas: string[];
+}
+
+export interface Tier2TelemetryPayload {
+  prowler: Array<Record<string, unknown>>;
+  checkov: Array<Record<string, unknown>>;
+  gitleaks: Array<Record<string, unknown>>;
+  nuclei: Array<Record<string, unknown>>;
+  cloudCliDb: Array<{
+    dbIdentifier: string;
+    replicationLagSeconds: number;
+    pitrEnabled: boolean;
+    multiRegionReplica: boolean;
+    estimatedFailoverRtoMinutes: number;
+  }>;
+}
+
+export interface NormalizedFinding {
+  canonicalKey: string;
+  ruleId: string;
+  title: string;
+  resource: string;
+  severity: 'critical' | 'high' | 'medium';
+  detectedBy: string[];
+  frameworks: string[];
+  remediationCli: string;
+  rpoRtoImpact: string;
+}
+
+export interface DbSlaEvaluation {
+  dbIdentifier: string;
+  replicationLagSeconds: number;
+  replicationLagMinutes: number;
+  pitrEnabled: boolean;
+  multiRegionReplica: boolean;
+  estimatedRtoMinutes: number;
+  rpoSlaMet: boolean;
+  rtoSlaMet: boolean;
+}
+
+export interface PipelineGateStage {
+  stage: string;
+  status: 'SKIPPED - PREVIOUSLY FULFILLED' | 'EXECUTING' | 'BLOCKED';
+  detail: string;
+}
+
+export interface NormalizedPipelineResult {
+  status: 'STEADY_STATE_REACHED' | 'NORMALIZED' | 'VALIDATION_ERROR';
+  gateStages: PipelineStageEvaluation[];
+  validationErrors: string[];
+  credentialHygiene: {
+    ephemeralCredentialsPurged: boolean;
+    rawSecretsRetained: boolean;
+    maskedIamArn: string;
+    maskedExternalId: string;
+    maskedGitToken: string;
+    purgedAt: string;
+  };
+  normalizedFindings: NormalizedFinding[];
+  duplicatesMerged: number;
+  noiseStrippedCount: number;
+  severityCounts: {
+    critical: number;
+    high: number;
+    medium: number;
+  };
+  dbSlaSummary: DbSlaEvaluation[];
+  complianceGapMatrix: Array<{
+    framework: string;
+    totalGaps: number;
+    criticalCount: number;
+    highCount: number;
+    mediumCount: number;
+  }>;
+  mermaidTopology: string;
+  inventorySnapshot: AssetInventoryPayload;
+}
+
+export interface PipelineStageEvaluation {
+  stage: string;
+  status: 'SKIPPED - PREVIOUSLY FULFILLED' | 'EXECUTING' | 'BLOCKED';
+  detail: string;
+}
+
+export interface AuditSynthesisResult {
+  success: boolean;
+  modelUsed: string;
+  fallbackTriggered: boolean;
+  diagnosticNotice?: string;
+  pass1ExecutiveRiskMd: string;
+  pass2RemediationRoadmapMd: string;
+  fullMarkdownReport: string;
+  statusBanner: string;
+}
+
