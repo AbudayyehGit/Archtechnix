@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Play, Shield, CheckCircle2, AlertTriangle, FileCode2 } from 'lucide-react';
+import type { OpaPolicySummary } from '../types';
 
 interface OPAResult {
   allowed: boolean;
@@ -9,7 +10,11 @@ interface OPAResult {
   reasons: string[];
 }
 
-export const OpaScanner: React.FC = () => {
+interface OpaScannerProps {
+  onEvaluationChange?: (summary: OpaPolicySummary) => void;
+}
+
+export const OpaScanner: React.FC<OpaScannerProps> = ({ onEvaluationChange }) => {
   const [policyCode, setPolicyCode] = useState<string>(`package enterprise.compliance.storage
 
 default allow = false
@@ -79,20 +84,36 @@ allow {
         violations.push(`VIOLATION: Unknown or unauthorized resource type '${parsed.resource_type ?? 'undefined'}'. Default deny triggered.`);
       }
 
-      setResult({
+      const nextResult: OPAResult = {
         allowed,
         code: allowed ? 200 : 403,
         badge: allowed ? 'PASS: ALLOWED (200)' : 'DENIED: POLICY VIOLATION (403)',
         violations,
         reasons
+      };
+      setResult(nextResult);
+      const pkgMatch = policyCode.match(/^\s*package\s+([^\s]+)/m);
+      onEvaluationChange?.({
+        ...nextResult,
+        policyPackage: pkgMatch?.[1] || 'enterprise.compliance.storage',
+        resourceType: String(parsed.resource_type || 'unknown'),
+        evaluatedAt: new Date().toISOString(),
       });
     } catch (e: any) {
-      setResult({
+      const errResult: OPAResult = {
         allowed: false,
         code: 400,
         badge: 'SYNTAX ERROR (400)',
         violations: [`Invalid JSON input: ${e?.message || 'Parse error'}`],
         reasons: []
+      };
+      setResult(errResult);
+      const pkgMatch = policyCode.match(/^\s*package\s+([^\s]+)/m);
+      onEvaluationChange?.({
+        ...errResult,
+        policyPackage: pkgMatch?.[1] || 'enterprise.compliance.storage',
+        resourceType: 'invalid_json',
+        evaluatedAt: new Date().toISOString(),
       });
     }
   };

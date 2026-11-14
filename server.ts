@@ -1204,6 +1204,63 @@ END:VCALENDAR`;
 const governanceStore = {
   steadyStates: [
     {
+      id: 'b7d14e20-9a33-4c82-8e4f-13a6b7c8d9e0',
+      checkpoint_label: 'steady-state-v2.6-rpo-warning-trend-csv',
+      git_commit_hash: 'v2.6-verified',
+      snapshot_metadata: {
+        blueprintVersion: 'v2.6.0-steady-state',
+        cleanupClean: true,
+        customWarningThresholds: true,
+        historical30DayLagLineChart: true,
+        rpoRtoCsvExport: true,
+        githubOAuthHandshakeAnimation: 'motion/react-4-stage',
+        pilotAuditComplianceExport: ['pdf', 'json'],
+        drDrillSimulator: true,
+        opaGithubActionWorkflowButton: true,
+        checkpointMotionAnimation: 'motion/react-slide-down',
+        rlsEnforcedRole: 'admin_architect'
+      },
+      established_at: new Date('2026-11-14T13:32:00Z').toISOString()
+    },
+    {
+      id: 'a4c92d10-7b22-4f91-9a1e-82c5d6e7f8a9',
+      checkpoint_label: 'steady-state-v2.5-handshake-compliance-drill',
+      git_commit_hash: 'v2.5-verified',
+      snapshot_metadata: {
+        blueprintVersion: 'v2.5.0-steady-state',
+        cleanupClean: true,
+        githubOAuthHandshakeAnimation: 'motion/react-4-stage',
+        pilotAuditComplianceExport: ['pdf', 'json'],
+        drDrillSimulator: true,
+        opaGithubActionWorkflowButton: true,
+        rpoRtoValidationTool: 'recharts-nist-pass-fail',
+        checkpointMotionAnimation: 'motion/react-slide-down',
+        intakeMinNotesChars: 25,
+        intakeMinComplianceMandates: 1,
+        rlsEnforcedRole: 'admin_architect'
+      },
+      established_at: new Date('2026-11-14T13:25:00Z').toISOString()
+    },
+    {
+      id: 'f2a81c90-4e11-4a22-8f3a-91d4e5f6a7b8',
+      checkpoint_label: 'steady-state-v2.4-workflow-rpo-motion',
+      git_commit_hash: 'v2.4-verified',
+      snapshot_metadata: {
+        blueprintVersion: 'v2.4.0-steady-state',
+        cleanupClean: true,
+        opaGithubActionWorkflowButton: true,
+        rpoRtoValidationTool: 'recharts-nist-pass-fail',
+        checkpointMotionAnimation: 'motion/react-slide-down',
+        clientActivityStream: true,
+        architectureDossierPdf: 'jspdf',
+        systemThemeSync: 'prefers-color-scheme',
+        intakeMinNotesChars: 25,
+        intakeMinComplianceMandates: 1,
+        rlsEnforcedRole: 'admin_architect'
+      },
+      established_at: new Date('2026-11-14T01:30:00Z').toISOString()
+    },
+    {
       id: 'e9b34f10-2c4a-4b11-9d8f-20b3c4d5e6f7',
       checkpoint_label: 'steady-state-v2.3-dossier-stream-theme',
       git_commit_hash: 'v2.3-verified',

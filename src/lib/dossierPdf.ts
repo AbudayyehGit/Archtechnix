@@ -358,3 +358,299 @@ export function downloadArchitectureDossierPdf({
   doc.save(filename);
   return filename;
 }
+
+export interface ComplianceControlEntry {
+  framework: string;
+  controlCode: string;
+  controlTitle: string;
+  severity: string;
+  isCompliant: boolean;
+  rpoRtoImpact: string;
+  remediationNote: string;
+}
+
+export interface ComplianceReportExportInput {
+  organizationName: string;
+  intakeData: import('../types').IntakeSpecData;
+  frameworkScores: {
+    overall: number;
+    SOC2: number;
+    ISO27001: number;
+    NIST: number;
+  };
+  sprintCountdown: {
+    elapsedDays: number;
+    deadlineDate: string;
+    expired: boolean;
+  };
+  opaResult: import('../types').OpaPolicySummary;
+  rpoRtoStatus: import('../types').RpoRtoValidationSnapshot;
+  scopeBoundaries: import('../types').ScopeBoundaryItem[];
+  controls: ComplianceControlEntry[];
+}
+
+export function buildComplianceAuditReportPayload(input: ComplianceReportExportInput) {
+  const inScopeItems = input.scopeBoundaries.filter((s) => s.classification === 'in_scope');
+  const outOfScopeItems = input.scopeBoundaries.filter(
+    (s) => s.classification === 'out_of_scope_retainer_candidate'
+  );
+  const escalatedCount = input.scopeBoundaries.filter(
+    (s) => s.status === 'escalated_to_retainer'
+  ).length;
+  const totalRequestedHours = input.scopeBoundaries.reduce(
+    (acc, item) => acc + (Number(item.requestedHours) || 0),
+    0
+  );
+
+  return {
+    reportMetadata: {
+      schemaVersion: 'archtechnix-compliance-report-v2.5',
+      generatedAt: new Date().toISOString(),
+      organization: input.organizationName || input.intakeData.org,
+      cloudProvider: input.intakeData.cloud,
+      repositoryUrl: input.intakeData.repo,
+      sprintWindow: {
+        day: input.sprintCountdown.elapsedDays,
+        windowDays: 14,
+        targetCloseDate: input.sprintCountdown.deadlineDate,
+        expired: input.sprintCountdown.expired,
+      },
+    },
+    executiveReadinessScores: input.frameworkScores,
+    opaPolicyEvaluation: input.opaResult,
+    rpoRtoValidation: input.rpoRtoStatus,
+    scopeBoundaryStatus: {
+      totalItems: input.scopeBoundaries.length,
+      inScopeCount: inScopeItems.length,
+      outOfScopeCandidateCount: outOfScopeItems.length,
+      escalatedToRetainerCount: escalatedCount,
+      totalRequestedHours,
+      items: input.scopeBoundaries,
+    },
+    complianceMatrixControls: input.controls,
+  };
+}
+
+export function downloadComplianceAuditReportPdf(input: ComplianceReportExportInput): string {
+  const payload = buildComplianceAuditReportPayload(input);
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const marginX = 16;
+  const contentWidth = pageWidth - marginX * 2;
+  const bottomMargin = 20;
+  let y = 18;
+
+  const ensureSpace = (neededMm: number) => {
+    if (y + neededMm > pageHeight - bottomMargin) {
+      doc.addPage();
+      y = 18;
+    }
+  };
+
+  const drawSection = (idx: string, title: string) => {
+    ensureSpace(16);
+    y += 3;
+    doc.setFillColor(15, 23, 42);
+    doc.rect(marginX, y, contentWidth, 8.2, 'F');
+    doc.setTextColor(249, 115, 22);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.text(idx, marginX + 3, y + 5.4);
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(10.2);
+    doc.text(title, marginX + 24, y + 5.4);
+    y += 12;
+    doc.setTextColor(15, 23, 42);
+  };
+
+  const writeLine = (
+    text: string,
+    opts?: {
+      fontSize?: number;
+      fontStyle?: 'normal' | 'bold';
+      fontFamily?: 'helvetica' | 'courier';
+      color?: [number, number, number];
+      indent?: number;
+      gapAfter?: number;
+    }
+  ) => {
+    const fontSize = opts?.fontSize ?? 9;
+    const fontStyle = opts?.fontStyle ?? 'normal';
+    const fontFamily = opts?.fontFamily ?? 'helvetica';
+    const color = opts?.color ?? [30, 41, 59];
+    const indent = opts?.indent ?? 0;
+    const gapAfter = opts?.gapAfter ?? 1.8;
+
+    doc.setFont(fontFamily, fontStyle);
+    doc.setFontSize(fontSize);
+    doc.setTextColor(color[0], color[1], color[2]);
+    const lines = doc.splitTextToSize(text, contentWidth - indent) as string[];
+    for (const line of lines) {
+      ensureSpace(6);
+      doc.text(line, marginX + indent, y);
+      y += 4.4;
+    }
+    y += gapAfter;
+  };
+
+  const generatedIso = payload.reportMetadata.generatedAt;
+  const reportRef = `ARCH-COMP-${generatedIso.slice(0, 10).replace(/-/g, '')}`;
+
+  // Header Banner
+  doc.setFillColor(2, 6, 23);
+  doc.rect(0, 0, pageWidth, 34, 'F');
+  doc.setFillColor(20, 184, 166);
+  doc.rect(0, 34, pageWidth, 1.4, 'F');
+
+  doc.setTextColor(45, 212, 191);
+  doc.setFont('courier', 'bold');
+  doc.setFontSize(9);
+  doc.text('ARCHTECHNIX {∞} · PILOT AUDIT COMPLIANCE REPORT', marginX, 11.5);
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.text('Unified OPA, RPO/RTO & Scope Compliance Report', marginX, 20.5);
+
+  doc.setTextColor(148, 163, 184);
+  doc.setFont('courier', 'normal');
+  doc.setFontSize(8);
+  doc.text(
+    `Ref: ${reportRef}   |   Org: ${payload.reportMetadata.organization}   |   Day ${payload.reportMetadata.sprintWindow.day}/14`,
+    marginX,
+    28.5
+  );
+  y = 42;
+
+  // Section 1: OPA Policy Results
+  drawSection('SECTION 01', 'OPA Policy-as-Code Evaluation Status');
+  writeLine(`Evaluation Verdict: ${input.opaResult.badge} (HTTP ${input.opaResult.code})`, {
+    fontStyle: 'bold',
+    fontFamily: 'courier',
+    color: input.opaResult.allowed ? [5, 150, 105] : [225, 29, 72],
+  });
+  writeLine(
+    `Policy Package: ${input.opaResult.policyPackage}   |   Target Resource: ${input.opaResult.resourceType}   |   Evaluated: ${new Date(input.opaResult.evaluatedAt).toLocaleString()}`,
+    { fontSize: 8.5, fontFamily: 'courier', color: [71, 85, 105] }
+  );
+  if (input.opaResult.reasons.length > 0) {
+    for (const r of input.opaResult.reasons) {
+      writeLine(`• PASS: ${r}`, { indent: 2, color: [5, 150, 105] });
+    }
+  }
+  if (input.opaResult.violations.length > 0) {
+    for (const v of input.opaResult.violations) {
+      writeLine(`• VIOLATION: ${v}`, { indent: 2, color: [225, 29, 72] });
+    }
+  }
+
+  // Section 2: RPO/RTO Validation & DR Drill History
+  drawSection('SECTION 02', 'RPO/RTO NIST Validation & Failover Drill Status');
+  writeLine(
+    `Profile: ${input.rpoRtoStatus.profileLabel} (${input.rpoRtoStatus.standardRef})`,
+    { fontStyle: 'bold' }
+  );
+  const rpoSectionColor: [number, number, number] =
+    input.rpoRtoStatus.overallStatus === 'FAIL'
+      ? [225, 29, 72]
+      : input.rpoRtoStatus.overallStatus === 'WARNING'
+      ? [217, 119, 6]
+      : [5, 150, 105];
+  writeLine(
+    `Overall NIST Verdict: ${input.rpoRtoStatus.overallStatus}   |   RPO: ${input.rpoRtoStatus.replicationLagMin}m (Warn >= ${input.rpoRtoStatus.rpoWarningMinutes}m, Max <= ${input.rpoRtoStatus.rpoMaxMinutes}m) [${input.rpoRtoStatus.rpoStatus}]   |   RTO: ${input.rpoRtoStatus.failoverTimeMin}m (Warn >= ${input.rpoRtoStatus.rtoWarningMinutes}m, Max <= ${input.rpoRtoStatus.rtoMaxMinutes}m) [${input.rpoRtoStatus.rtoStatus}]`,
+    {
+      fontFamily: 'courier',
+      fontSize: 8.3,
+      color: rpoSectionColor,
+    }
+  );
+  if (input.rpoRtoStatus.drillHistory.length === 0) {
+    writeLine('DR Failover Drill Simulator: No virtual failover drills recorded yet.', {
+      indent: 2,
+      color: [100, 116, 139],
+    });
+  } else {
+    writeLine(`Recorded Disaster Recovery Drills (${input.rpoRtoStatus.drillHistory.length}):`, {
+      fontStyle: 'bold',
+      gapAfter: 1,
+    });
+    for (const drill of input.rpoRtoStatus.drillHistory.slice(0, 6)) {
+      writeLine(
+        `• [${drill.outcome}] ${drill.scenarioName} — Simulated Downtime: ${drill.simulatedDowntimeMin}m (RTO <= ${drill.targetRtoMin}m), Data Loss: ${drill.simulatedDataLossMin}m (RPO <= ${drill.targetRpoMin}m) @ ${new Date(drill.triggeredAt).toLocaleString()}`,
+        {
+          indent: 2,
+          fontSize: 8.4,
+          color: drill.outcome === 'PASS' ? [5, 150, 105] : [225, 29, 72],
+        }
+      );
+    }
+  }
+
+  // Section 3: Scope Boundary Status
+  drawSection('SECTION 03', 'Scope Boundary & Retainer Escalation Ledger');
+  writeLine(
+    `Total Items: ${payload.scopeBoundaryStatus.totalItems}   |   In-Scope: ${payload.scopeBoundaryStatus.inScopeCount}   |   Out-of-Scope Candidates: ${payload.scopeBoundaryStatus.outOfScopeCandidateCount}   |   Escalated to Retainer: ${payload.scopeBoundaryStatus.escalatedToRetainerCount}   |   Total Hours: ${payload.scopeBoundaryStatus.totalRequestedHours}h`,
+    { fontFamily: 'courier', fontSize: 8.5, color: [51, 65, 85] }
+  );
+  if (input.scopeBoundaries.length === 0) {
+    writeLine('No scope boundary items logged for this diagnostic sprint.', {
+      indent: 2,
+      color: [100, 116, 139],
+    });
+  } else {
+    for (const sb of input.scopeBoundaries) {
+      writeLine(
+        `• [${sb.status.toUpperCase()}] ${sb.title} (${sb.classification}, ${sb.requestedHours}h) — ${sb.rationale}`,
+        {
+          indent: 2,
+          fontSize: 8.4,
+          color: sb.classification === 'out_of_scope_retainer_candidate' ? [180, 83, 9] : [30, 41, 59],
+        }
+      );
+    }
+  }
+
+  // Section 4: DevSecOps Control Matrix Summary
+  drawSection('SECTION 04', `DevSecOps Control Matrix (Overall Readiness: ${input.frameworkScores.overall}%)`);
+  writeLine(
+    `SOC 2 Type II: ${input.frameworkScores.SOC2}%   |   ISO/IEC 27001: ${input.frameworkScores.ISO27001}%   |   NIST SP 800-207 Zero Trust: ${input.frameworkScores.NIST}%`,
+    { fontFamily: 'courier', fontSize: 8.6, fontStyle: 'bold' }
+  );
+  for (const ctrl of input.controls) {
+    writeLine(
+      `• [${ctrl.isCompliant ? 'COMPLIANT' : 'REMEDIATE'}] ${ctrl.framework} ${ctrl.controlCode} (${ctrl.severity.toUpperCase()}): ${ctrl.controlTitle} — ${ctrl.rpoRtoImpact}`,
+      {
+        indent: 2,
+        fontSize: 8.3,
+        color: ctrl.isCompliant ? [5, 150, 105] : [30, 41, 59],
+      }
+    );
+  }
+
+  const totalPages = doc.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p += 1) {
+    doc.setPage(p);
+    doc.setDrawColor(226, 232, 240);
+    doc.line(marginX, pageHeight - 13, pageWidth - marginX, pageHeight - 13);
+    doc.setFont('courier', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(
+      `Archtechnix {∞} · Unified Compliance Audit Report (${reportRef})`,
+      marginX,
+      pageHeight - 8.5
+    );
+    doc.text(`Page ${p} of ${totalPages}`, pageWidth - marginX - 18, pageHeight - 8.5);
+  }
+
+  const filename = `archtechnix-compliance-report-${slugifyFilename(payload.reportMetadata.organization)}-${generatedIso.slice(0, 10)}.pdf`;
+  doc.save(filename);
+  return filename;
+}
+

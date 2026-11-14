@@ -6,6 +6,7 @@ import {
   CreditCard,
   Download,
   ExternalLink,
+  FileJson,
   FileSpreadsheet,
   FileText,
   Lock,
@@ -19,13 +20,19 @@ import {
 } from 'lucide-react';
 import { useAuth, type CapacitySummary } from '../contexts/AuthContext';
 import {
+  buildComplianceAuditReportPayload,
+  downloadComplianceAuditReportPdf,
+} from '../lib/dossierPdf';
+import {
   DEFAULT_OFFLINE_METRICS,
   offlineDb,
   type OfflineComplianceMetric,
 } from '../lib/offlineDb';
 import type {
   IntakeSpecData,
+  OpaPolicySummary,
   PreFlightDebtFinding,
+  RpoRtoValidationSnapshot,
   ScopeBoundaryItem,
   ScopeTaskStatus,
   SystemSteadyState,
@@ -68,7 +75,42 @@ interface PilotAuditDashboardProps {
   onEscalateOutOfScopeToSkillBuilder?: (item: ScopeBoundaryItem) => void;
   onCommitSteadyState?: (state: SystemSteadyState) => void;
   capacity?: CapacitySummary;
+  opaResult?: OpaPolicySummary;
+  rpoRtoStatus?: RpoRtoValidationSnapshot;
 }
+
+const DEFAULT_OPA_SUMMARY: OpaPolicySummary = {
+  allowed: true,
+  code: 200,
+  badge: 'PASS: ALLOWED (200)',
+  policyPackage: 'enterprise.compliance.storage',
+  resourceType: 'aws_s3_bucket',
+  violations: [],
+  reasons: [
+    'Complies with Rule 1: S3 bucket enforces KMS envelope encryption and blocks public access.',
+  ],
+  evaluatedAt: new Date().toISOString(),
+};
+
+const DEFAULT_RPO_RTO_SNAPSHOT: RpoRtoValidationSnapshot = {
+  profileId: 'nist-ha',
+  profileLabel: 'NIST SP 800-34 High-Availability',
+  standardRef: 'NIST SP 800-34 Rev.1 · Tier 1 Mission-Critical',
+  replicationLagMin: 8,
+  failoverTimeMin: 12,
+  rpoWarningMinutes: 11,
+  rtoWarningMinutes: 11,
+  rpoMaxMinutes: 15,
+  rtoMaxMinutes: 15,
+  rpoPassed: true,
+  rtoPassed: true,
+  overallPassed: true,
+  rpoStatus: 'PASS',
+  rtoStatus: 'WARNING',
+  overallStatus: 'WARNING',
+  updatedAt: new Date().toISOString(),
+  drillHistory: [],
+};
 
 const DEFAULT_FALLBACK_INTAKE: IntakeSpecData = {
   org: 'Apex FinTech Systems',
@@ -100,6 +142,8 @@ export const PilotAuditDashboard: React.FC<PilotAuditDashboardProps> = ({
   onEscalateOutOfScopeToSkillBuilder,
   onCommitSteadyState,
   capacity = DEFAULT_FALLBACK_CAPACITY,
+  opaResult = DEFAULT_OPA_SUMMARY,
+  rpoRtoStatus = DEFAULT_RPO_RTO_SNAPSHOT,
 }) => {
   const {
     user,
@@ -432,6 +476,54 @@ ${roadmapMarkdown}
     onShowToast('Pilot Audit Report exported as Markdown (.md)!');
   };
 
+  const buildUnifiedReportInput = () => ({
+    organizationName: workspace?.client?.organizationName || intakeData.org || 'Enterprise Assessment',
+    intakeData,
+    frameworkScores,
+    sprintCountdown: {
+      elapsedDays: countdown.elapsedDays,
+      deadlineDate: countdown.deadlineDate,
+      expired: countdown.expired,
+    },
+    opaResult,
+    rpoRtoStatus,
+    scopeBoundaries,
+    controls: metrics.map((m) => ({
+      framework: m.framework,
+      controlCode: m.controlCode,
+      controlTitle: m.controlTitle,
+      severity: m.severity,
+      isCompliant: m.isCompliant,
+      rpoRtoImpact: m.rpoRtoImpact,
+      remediationNote: m.remediationNote,
+    })),
+  });
+
+  const handleExportCompliancePdf = () => {
+    try {
+      const filename = downloadComplianceAuditReportPdf(buildUnifiedReportInput());
+      onShowToast(`Unified Compliance Report PDF downloaded (${filename})!`);
+    } catch (err: any) {
+      onShowToast(err?.message || 'Unable to generate Unified Compliance PDF.');
+    }
+  };
+
+  const handleExportComplianceJson = () => {
+    const payload = buildComplianceAuditReportPayload(buildUnifiedReportInput());
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `archtechnix-compliance-report-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    onShowToast('Unified Compliance Report exported as JSON (OPA + RPO/RTO + Scope)!');
+  };
+
   return (
     <div className="space-y-8">
       {/* Portal Header & Authenticated Client Session Control */}
@@ -489,6 +581,24 @@ ${roadmapMarkdown}
               </button>
             </div>
           )}
+
+          <button
+            type="button"
+            onClick={handleExportCompliancePdf}
+            className="px-3 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-teal-500/40 text-teal-300 font-mono text-xs font-semibold flex items-center space-x-1.5 transition-colors"
+          >
+            <FileText className="w-4 h-4 text-teal-400" />
+            <span>Export Compliance PDF</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportComplianceJson}
+            className="px-3 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-violet-500/40 text-violet-300 font-mono text-xs font-semibold flex items-center space-x-1.5 transition-colors"
+          >
+            <FileJson className="w-4 h-4 text-violet-400" />
+            <span>Export JSON</span>
+          </button>
 
           <button
             type="button"
@@ -623,6 +733,62 @@ ${roadmapMarkdown}
               className="h-full bg-violet-400 transition-all duration-300"
               style={{ width: `${frameworkScores.NIST}%` }}
             />
+          </div>
+        </div>
+      </div>
+
+      {/* Unified Compliance Export Snapshot (OPA + RPO/RTO + Scope Boundary) */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
+          <div className="text-xs font-mono uppercase tracking-wider text-teal-400 font-semibold">
+            Aggregated Compliance Report Coverage (PDF &amp; JSON)
+          </div>
+          <span className="text-[11px] font-mono text-slate-400">
+            Live sync across OPA Scanner · RPO/RTO Validator · Scope Boundary Log
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-mono">
+          <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+            <div className="text-[11px] text-slate-400">OPA Policy-as-Code Gate</div>
+            <div className={`font-bold ${opaResult.allowed ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {opaResult.badge}
+            </div>
+            <div className="text-[11px] text-slate-500 truncate">
+              {opaResult.policyPackage} · {opaResult.resourceType}
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1 tabular-nums">
+            <div className="text-[11px] text-slate-400">RPO / RTO NIST Validation</div>
+            <div
+              className={`font-bold ${
+                rpoRtoStatus.overallStatus === 'FAIL'
+                  ? 'text-rose-400'
+                  : rpoRtoStatus.overallStatus === 'WARNING'
+                  ? 'text-amber-400'
+                  : 'text-emerald-400'
+              }`}
+            >
+              {rpoRtoStatus.overallStatus} · {rpoRtoStatus.replicationLagMin}m RPO / {rpoRtoStatus.failoverTimeMin}m RTO
+            </div>
+            <div className="text-[11px] text-slate-500">
+              Warn ≥ {rpoRtoStatus.rpoWarningMinutes}m/{rpoRtoStatus.rtoWarningMinutes}m · {rpoRtoStatus.drillHistory.length} DR {rpoRtoStatus.drillHistory.length === 1 ? 'drill' : 'drills'}
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1 tabular-nums">
+            <div className="text-[11px] text-slate-400">Scope Boundary Ledger</div>
+            <div className="font-bold text-white">
+              {scopeBoundaries.length} Logged ·{' '}
+              <span className="text-amber-400">
+                {scopeBoundaries.filter((s) => s.classification === 'out_of_scope_retainer_candidate').length} Retainer Candidates
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-500">
+              {scopeBoundaries.filter((s) => s.status === 'escalated_to_retainer').length} escalated ·{' '}
+              {scopeBoundaries.reduce((sum, s) => sum + (Number(s.requestedHours) || 0), 0)}h scoped
+            </div>
           </div>
         </div>
       </div>

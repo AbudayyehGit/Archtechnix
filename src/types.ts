@@ -301,3 +301,48 @@ export interface AuditSynthesisResult {
   statusBanner: string;
 }
 
+export interface OpaPolicySummary {
+  allowed: boolean;
+  code: number;
+  badge: string;
+  policyPackage: string;
+  resourceType: string;
+  violations: string[];
+  reasons: string[];
+  evaluatedAt: string;
+}
+
+export interface DrDrillRecord {
+  id: string;
+  scenarioName: string;
+  triggeredAt: string;
+  simulatedDowntimeMin: number;
+  simulatedDataLossMin: number;
+  targetRtoMin: number;
+  targetRpoMin: number;
+  nistProfileLabel: string;
+  outcome: 'PASS' | 'FAIL';
+  recoveryNotes: string;
+}
+
+export type RpoRtoStatus = 'PASS' | 'WARNING' | 'FAIL';
+
+export interface RpoRtoValidationSnapshot {
+  profileId: string;
+  profileLabel: string;
+  standardRef: string;
+  replicationLagMin: number;
+  failoverTimeMin: number;
+  rpoWarningMinutes: number;
+  rtoWarningMinutes: number;
+  rpoMaxMinutes: number;
+  rtoMaxMinutes: number;
+  rpoPassed: boolean;
+  rtoPassed: boolean;
+  overallPassed: boolean;
+  rpoStatus: RpoRtoStatus;
+  rtoStatus: RpoRtoStatus;
+  overallStatus: RpoRtoStatus;
+  updatedAt: string;
+  drillHistory: DrDrillRecord[];
+}

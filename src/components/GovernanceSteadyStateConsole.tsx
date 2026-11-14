@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   Check,
   CheckCircle2,
@@ -407,37 +408,44 @@ export const GovernanceSteadyStateConsole: React.FC<GovernanceSteadyStateConsole
                 Established Steady States ({steadyStates.length})
               </div>
               <div className="space-y-2 max-h-[210px] overflow-y-auto pr-1">
-                {steadyStates.map((ss) => (
-                  <div
-                    key={ss.id}
-                    className="p-3 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-between gap-3 text-xs font-mono"
-                  >
-                    <div className="min-w-0">
-                      <div className="font-bold text-white truncate">{ss.checkpoint_label}</div>
-                      <div className="text-[11px] text-slate-400 tabular-nums mt-0.5">
-                        sha:{ss.git_commit_hash} · {new Date(ss.established_at).toLocaleString()}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleCopy(
-                          buildSteadyStateInsertSql(ss),
-                          ss.id,
-                          'Steady-state SQL INSERT copied.'
-                        )
-                      }
-                      className="min-h-[36px] px-2.5 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-cyan-400 text-[11px] flex items-center space-x-1 shrink-0"
+                <AnimatePresence initial={false}>
+                  {steadyStates.map((ss) => (
+                    <motion.div
+                      key={ss.id}
+                      layout
+                      initial={{ opacity: 0, y: -18, scale: 0.98 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -10, scale: 0.98 }}
+                      transition={{ duration: 0.25, ease: 'easeOut' }}
+                      className="p-3 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-between gap-3 text-xs font-mono"
                     >
-                      {copiedKey === ss.id ? (
-                        <Check className="w-3 h-3 text-emerald-400" />
-                      ) : (
-                        <Copy className="w-3 h-3" />
-                      )}
-                      <span>SQL</span>
-                    </button>
-                  </div>
-                ))}
+                      <div className="min-w-0">
+                        <div className="font-bold text-white truncate">{ss.checkpoint_label}</div>
+                        <div className="text-[11px] text-slate-400 tabular-nums mt-0.5">
+                          sha:{ss.git_commit_hash} · {new Date(ss.established_at).toLocaleString()}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleCopy(
+                            buildSteadyStateInsertSql(ss),
+                            ss.id,
+                            'Steady-state SQL INSERT copied.'
+                          )
+                        }
+                        className="min-h-[36px] px-2.5 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-cyan-400 text-[11px] flex items-center space-x-1 shrink-0"
+                      >
+                        {copiedKey === ss.id ? (
+                          <Check className="w-3 h-3 text-emerald-400" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                        <span>SQL</span>
+                      </button>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
               </div>
             </div>
           </div>

@@ -1,13 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   CalendarCheck,
+  Check,
   CheckCircle2,
+  Copy,
   CreditCard,
   Download,
   Edit3,
   Eye,
   FileCode2,
   FileText,
+  GitPullRequest,
   Plus,
   Save,
   Shield,
@@ -35,6 +38,60 @@ interface RetainerGovernanceHubProps {
   intakeData?: IntakeSpecData;
   steadyStates?: SystemSteadyState[];
 }
+
+const OPA_REGO_GITHUB_WORKFLOW = `# .github/workflows/opa-rego-pr-scan.yml
+# Archtechnix {∞} Automated OPA Rego Pull Request Compliance Gate
+name: Archtechnix OPA Rego PR Gate
+
+on:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'terraform/**'
+      - 'iac/**'
+      - 'policy/**'
+      - '.github/workflows/opa-rego-pr-scan.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  opa-rego-compliance-scan:
+    name: OPA Rego Policy Evaluation (SOC2 / NIST / ISO27001)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Open Policy Agent (OPA)
+        uses: open-policy-agent/setup-opa@v2
+        with:
+          version: latest
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Generate Terraform Plan JSON
+        working-directory: terraform
+        run: |
+          terraform init -backend=false
+          terraform plan -out=tfplan.binary
+          terraform show -json tfplan.binary > ../tfplan.json
+
+      - name: Run Rego Policy Unit Tests
+        run: opa test policy/ -v
+
+      - name: Enforce Zero High-Severity Violations
+        run: |
+          opa eval --fail-defined \\
+            --data policy/ \\
+            --input tfplan.json \\
+            --format pretty \\
+            "data.archtechnix.compliance.deny"
+`;
 
 const DOC_CATEGORIES: Array<{
   type: OfflineAdrDoc['docType'];
@@ -286,6 +343,15 @@ Documents Included: ${docs.map((d) => d.docNumber).join(', ')}
     }
   };
 
+  const [copiedWorkflow, setCopiedWorkflow] = useState(false);
+
+  const handleCopyGithubActionWorkflow = () => {
+    navigator.clipboard.writeText(OPA_REGO_GITHUB_WORKFLOW);
+    setCopiedWorkflow(true);
+    onShowToast('OPA Rego GitHub Action Workflow (.github/workflows/opa-rego-pr-scan.yml) copied!');
+    window.setTimeout(() => setCopiedWorkflow(false), 2000);
+  };
+
   const handleTogglePreRead = (itemId: string) => {
     const nextChecklist = agenda.preReadChecklist.map((item) =>
       item.id === itemId ? { ...item, completed: !item.completed } : item
@@ -376,6 +442,20 @@ Documents Included: ${docs.map((d) => d.docNumber).join(', ')}
         </div>
 
         <div className="flex flex-wrap items-center gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={handleCopyGithubActionWorkflow}
+            className="px-3.5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-emerald-500/40 text-emerald-300 font-mono text-xs font-semibold flex items-center space-x-1.5 transition-colors"
+          >
+            {copiedWorkflow ? (
+              <Check className="w-4 h-4 text-emerald-400" />
+            ) : (
+              <GitPullRequest className="w-4 h-4 text-emerald-400" />
+            )}
+            <span>{copiedWorkflow ? 'Workflow Copied' : 'Copy GitHub Action Workflow'}</span>
+            {!copiedWorkflow && <Copy className="w-3.5 h-3.5 text-slate-400" />}
+          </button>
+
           <button
             type="button"
             onClick={handleDownloadArchitectureDossier}

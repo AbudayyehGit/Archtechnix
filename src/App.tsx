@@ -31,7 +31,9 @@ import {
   IntakeSpecData,
   IntakeValidationThresholds,
   ModalPayload,
+  OpaPolicySummary,
   RequirementSpec,
+  RpoRtoValidationSnapshot,
   ScopeBoundaryItem,
   ScopeTaskStatus,
   SkillEvolutionLog,
@@ -51,6 +53,7 @@ import { AdvisoryAvailability } from './components/AdvisoryAvailability';
 import { IntegrationsSection } from './components/IntegrationsSection';
 import { FaqSection } from './components/FaqSection';
 import { RpoRtoBenchmarkChart } from './components/RpoRtoBenchmarkChart';
+import { RpoRtoValidationTool } from './components/RpoRtoValidationTool';
 import { BottleneckAssessment } from './components/BottleneckAssessment';
 import { PilotAuditDashboard } from './components/PilotAuditDashboard';
 import { RetainerGovernanceHub } from './components/RetainerGovernanceHub';
@@ -123,6 +126,37 @@ export default function App() {
   const [governanceHydrated, setGovernanceHydrated] = useState<boolean>(false);
   const [scopeBoundaries, setScopeBoundaries] = useState<ScopeBoundaryItem[]>([]);
   const [scopeHydrated, setScopeHydrated] = useState<boolean>(false);
+  const [opaSummary, setOpaSummary] = useState<OpaPolicySummary>({
+    allowed: true,
+    code: 200,
+    badge: 'PASS: ALLOWED (200)',
+    policyPackage: 'enterprise.compliance.storage',
+    resourceType: 'aws_s3_bucket',
+    violations: [],
+    reasons: [
+      'Complies with Rule 1: S3 bucket enforces KMS envelope encryption and blocks public access.',
+    ],
+    evaluatedAt: new Date().toISOString(),
+  });
+  const [rpoRtoSnapshot, setRpoRtoSnapshot] = useState<RpoRtoValidationSnapshot>({
+    profileId: 'nist-ha',
+    profileLabel: 'NIST SP 800-34 High-Availability',
+    standardRef: 'NIST SP 800-34 Rev.1 · Tier 1 Mission-Critical',
+    replicationLagMin: 8,
+    failoverTimeMin: 12,
+    rpoWarningMinutes: 11,
+    rtoWarningMinutes: 11,
+    rpoMaxMinutes: 15,
+    rtoMaxMinutes: 15,
+    rpoPassed: true,
+    rtoPassed: true,
+    overallPassed: true,
+    rpoStatus: 'PASS',
+    rtoStatus: 'WARNING',
+    overallStatus: 'WARNING',
+    updatedAt: new Date().toISOString(),
+    drillHistory: [],
+  });
 
   // Check for Stripe Checkout return parameters (?status=success&session_id=...)
   useEffect(() => {
@@ -1059,6 +1093,10 @@ ${JSON.stringify(webhookEvent, null, 2)}
                         Steady-State & Guards
                       </button>
                       <span className="text-slate-700" aria-hidden="true">·</span>
+                      <button onClick={() => navigateToModule('funnel', 'rpo-rto-validation-tool')} className="text-slate-300 hover:text-cyan-400 transition-colors underline underline-offset-2">
+                        RPO/RTO Validator
+                      </button>
+                      <span className="text-slate-700" aria-hidden="true">·</span>
                       <button onClick={() => setMode('academy')} className="text-cyan-400 hover:text-cyan-300 transition-colors underline underline-offset-2">
                         Flex Wizard
                       </button>
@@ -1195,10 +1233,14 @@ ${JSON.stringify(webhookEvent, null, 2)}
                 </div>
               </section>
 
-              {/* Sub-15m RPO/RTO Disaster Recovery Benchmark Visualization */}
+              {/* Sub-15m RPO/RTO Disaster Recovery Benchmark Visualization & Interactive Validator */}
               <section id="rpo-rto-section" className="py-16 bg-slate-950 border-b border-slate-800">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                   <RpoRtoBenchmarkChart />
+                  <RpoRtoValidationTool
+                    onShowToast={showToast}
+                    onValidationChange={setRpoRtoSnapshot}
+                  />
                 </div>
               </section>
 
@@ -1299,6 +1341,8 @@ ${JSON.stringify(webhookEvent, null, 2)}
                     onEscalateOutOfScopeToSkillBuilder={handleEscalateOutOfScopeToSkillBuilder}
                     onCommitSteadyState={handleCommitSteadyState}
                     capacity={capacity}
+                    opaResult={opaSummary}
+                    rpoRtoStatus={rpoRtoSnapshot}
                   />
                 </div>
               </section>
@@ -1316,7 +1360,7 @@ ${JSON.stringify(webhookEvent, null, 2)}
                     </p>
                   </div>
 
-                  <OpaScanner />
+                  <OpaScanner onEvaluationChange={setOpaSummary} />
                 </div>
               </section>
             </>

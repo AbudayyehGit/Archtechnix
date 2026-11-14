@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { 
   ShieldCheck, 
   CheckCircle2, 
@@ -11,8 +12,38 @@ import {
   RefreshCw,
   FolderGit2,
   Cpu,
-  Unplug
+  Unplug,
+  Lock
 } from 'lucide-react';
+
+interface HandshakeStep {
+  id: string;
+  label: string;
+  detail: string;
+}
+
+const HANDSHAKE_STEPS: HandshakeStep[] = [
+  {
+    id: 'nonce',
+    label: 'PKCE & State Nonce Exchange',
+    detail: 'Generating SHA-256 challenge and anti-CSRF state vector',
+  },
+  {
+    id: 'scopes',
+    label: 'GitHub Organization Scope Verification',
+    detail: 'Validating repo, admin:repo_hook, and read:org permissions',
+  },
+  {
+    id: 'token',
+    label: 'Ephemeral OAuth Token Handshake',
+    detail: 'Negotiating TLS 1.3 scoped session credentials',
+  },
+  {
+    id: 'webhook',
+    label: 'Audit Telemetry Channel Binding',
+    detail: 'Syncing organization repository governance context',
+  },
+];
 
 interface IntegrationsSectionProps {
   onShowToast?: (message: string) => void;
@@ -30,7 +61,19 @@ export const IntegrationsSection: React.FC<IntegrationsSectionProps> = ({
   const [githubUser, setGithubUser] = useState<string>('AbudayyehGit');
   const [connectedScopes, setConnectedScopes] = useState<string[]>(['repo', 'admin:repo_hook', 'read:org']);
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
+  const [handshakeStage, setHandshakeStage] = useState<number>(-1);
+  const [handshakeMode, setHandshakeMode] = useState<'oauth' | 'fast' | null>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  const handshakeTimersRef = useRef<number[]>([]);
+
+  const clearHandshakeTimers = () => {
+    handshakeTimersRef.current.forEach((id) => window.clearTimeout(id));
+    handshakeTimersRef.current = [];
+  };
+
+  useEffect(() => {
+    return () => clearHandshakeTimers();
+  }, []);
 
   // Provisioning state
   const [repoName, setRepoName] = useState<string>(`archtechnix-advisory-apex`);
@@ -71,14 +114,21 @@ export const IntegrationsSection: React.FC<IntegrationsSectionProps> = ({
       }
 
       if (event.data?.type === 'GITHUB_OAUTH_SUCCESS') {
-        setIsConnected(true);
-        setIsConnecting(false);
-        if (event.data.orgName) setGithubOrg(event.data.orgName);
-        if (event.data.username) setGithubUser(event.data.username);
-        if (event.data.scopes) setConnectedScopes(event.data.scopes);
-        if (onShowToast) {
-          onShowToast(`GitHub Organization @${event.data.orgName || 'ApexFinTech-Security'} Connected!`);
-        }
+        clearHandshakeTimers();
+        setHandshakeStage(3);
+        const completeTimer = window.setTimeout(() => {
+          setIsConnected(true);
+          setIsConnecting(false);
+          setHandshakeStage(-1);
+          setHandshakeMode(null);
+          if (event.data.orgName) setGithubOrg(event.data.orgName);
+          if (event.data.username) setGithubUser(event.data.username);
+          if (event.data.scopes) setConnectedScopes(event.data.scopes);
+          if (onShowToast) {
+            onShowToast(`GitHub Organization @${event.data.orgName || 'ApexFinTech-Security'} Connected!`);
+          }
+        }, 420);
+        handshakeTimersRef.current.push(completeTimer);
       }
     };
 
@@ -86,13 +136,25 @@ export const IntegrationsSection: React.FC<IntegrationsSectionProps> = ({
     return () => window.removeEventListener('message', handleMessage);
   }, [onShowToast]);
 
+  const sleepMs = (ms: number) =>
+    new Promise<void>((resolve) => {
+      const id = window.setTimeout(resolve, ms);
+      handshakeTimersRef.current.push(id);
+    });
+
   const handleConnectGithubOAuth = async () => {
+    clearHandshakeTimers();
     setIsConnecting(true);
+    setHandshakeMode('oauth');
+    setHandshakeStage(0);
     try {
+      await sleepMs(260);
+      setHandshakeStage(1);
       const res = await fetch('/api/auth/github/url');
       const data = await res.json();
 
       if (data.url) {
+        setHandshakeStage(2);
         // Open provider's authorize URL directly in popup
         const authWindow = window.open(
           data.url,
@@ -103,6 +165,8 @@ export const IntegrationsSection: React.FC<IntegrationsSectionProps> = ({
         if (!authWindow) {
           alert('Please allow popups for this site to complete GitHub OAuth authentication.');
           setIsConnecting(false);
+          setHandshakeStage(-1);
+          setHandshakeMode(null);
           return;
         }
 
@@ -111,6 +175,8 @@ export const IntegrationsSection: React.FC<IntegrationsSectionProps> = ({
           if (authWindow.closed) {
             clearInterval(checkClosed);
             setIsConnecting(false);
+            setHandshakeStage(-1);
+            setHandshakeMode(null);
           }
         }, 1000);
       } else {
@@ -123,8 +189,16 @@ export const IntegrationsSection: React.FC<IntegrationsSectionProps> = ({
   };
 
   const handleFastConnect = async () => {
+    clearHandshakeTimers();
     setIsConnecting(true);
+    setHandshakeMode('fast');
+    setHandshakeStage(0);
     try {
+      await sleepMs(260);
+      setHandshakeStage(1);
+      await sleepMs(280);
+      setHandshakeStage(2);
+
       const res = await fetch('/api/github/fast-connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -134,6 +208,8 @@ export const IntegrationsSection: React.FC<IntegrationsSectionProps> = ({
         })
       });
       const data = await res.json();
+      setHandshakeStage(3);
+      await sleepMs(320);
       if (data.success) {
         setIsConnected(true);
         if (onShowToast) {
@@ -141,10 +217,14 @@ export const IntegrationsSection: React.FC<IntegrationsSectionProps> = ({
         }
       }
     } catch {
+      setHandshakeStage(3);
+      await sleepMs(280);
       setIsConnected(true);
       if (onShowToast) onShowToast(`GitHub Organization Connected!`);
     } finally {
       setIsConnecting(false);
+      setHandshakeStage(-1);
+      setHandshakeMode(null);
     }
   };
 
@@ -321,17 +401,96 @@ export const IntegrationsSection: React.FC<IntegrationsSectionProps> = ({
               </div>
             </div>
 
+            {/* Animated Authentication Handshake Progress Panel */}
+            <AnimatePresence>
+              {isConnecting && handshakeStage >= 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.22, ease: 'easeOut' }}
+                  className="mb-4 p-4 rounded-xl bg-slate-900 border border-cyan-500/40 space-y-3"
+                >
+                  <div className="flex items-center justify-between gap-2 text-xs font-mono">
+                    <div className="flex items-center space-x-2 text-cyan-300 font-bold">
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1.6, repeat: Infinity, ease: 'linear' }}
+                      >
+                        <Lock className="w-3.5 h-3.5 text-cyan-400" />
+                      </motion.div>
+                      <span>
+                        GitHub Authentication Handshake ({handshakeMode === 'oauth' ? 'OAuth 2.0' : 'Token Link'})
+                      </span>
+                    </div>
+                    <span className="text-cyan-400 tabular-nums font-bold">
+                      Step {Math.min(HANDSHAKE_STEPS.length, handshakeStage + 1)} / {HANDSHAKE_STEPS.length} ·{' '}
+                      {Math.round(((handshakeStage + 1) / HANDSHAKE_STEPS.length) * 100)}%
+                    </span>
+                  </div>
+
+                  {/* Compositor-only scaleX progress track */}
+                  <div className="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                    <motion.div
+                      className="h-full bg-gradient-to-r from-cyan-400 via-teal-400 to-emerald-400 origin-left"
+                      initial={{ scaleX: 0.08 }}
+                      animate={{
+                        scaleX: (handshakeStage + 1) / HANDSHAKE_STEPS.length,
+                      }}
+                      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {HANDSHAKE_STEPS.map((step, idx) => {
+                      const done = idx < handshakeStage;
+                      const active = idx === handshakeStage;
+                      return (
+                        <motion.div
+                          key={step.id}
+                          initial={{ opacity: 0.45 }}
+                          animate={{ opacity: done || active ? 1 : 0.45 }}
+                          transition={{ duration: 0.2 }}
+                          className={`p-2.5 rounded-lg border text-[11px] font-mono flex items-start space-x-2 ${
+                            done
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                              : active
+                              ? 'bg-cyan-500/10 border-cyan-500/40 text-cyan-200'
+                              : 'bg-slate-950 border-slate-800 text-slate-500'
+                          }`}
+                        >
+                          {done ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                          ) : active ? (
+                            <RefreshCw className="w-3.5 h-3.5 text-cyan-400 animate-spin shrink-0 mt-0.5" />
+                          ) : (
+                            <ShieldCheck className="w-3.5 h-3.5 text-slate-600 shrink-0 mt-0.5" />
+                          )}
+                          <div className="min-w-0">
+                            <div className="font-semibold truncate">{step.label}</div>
+                            <div className="text-[10px] opacity-80 font-sans truncate">
+                              {step.detail}
+                            </div>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* Connect Buttons */}
             <div className="pt-4 border-t border-slate-800/80 flex flex-wrap items-center gap-3">
               <button
                 onClick={handleConnectGithubOAuth}
                 disabled={isConnecting}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-mono text-xs font-bold transition-all shadow-lg shadow-orange-500/20 flex items-center space-x-2"
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-mono text-xs font-bold transition-all shadow-lg shadow-orange-500/20 flex items-center space-x-2 disabled:opacity-60"
               >
                 {isConnecting ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Connecting via OAuth...</span>
+                    <span>Handshaking via OAuth...</span>
                   </>
                 ) : (
                   <>
@@ -344,7 +503,7 @@ export const IntegrationsSection: React.FC<IntegrationsSectionProps> = ({
               <button
                 onClick={handleFastConnect}
                 disabled={isConnecting}
-                className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white font-mono text-xs font-semibold transition-colors flex items-center space-x-2"
+                className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white font-mono text-xs font-semibold transition-colors flex items-center space-x-2 disabled:opacity-60"
               >
                 <Zap className="w-3.5 h-3.5 text-cyan-400" />
                 <span>Instant Demo Connect</span>
@@ -408,7 +567,12 @@ export const IntegrationsSection: React.FC<IntegrationsSectionProps> = ({
         </div>
       ) : (
         /* Connected State: Organization Details & Auto-Provisioning Form */
-        <div className="mt-6 space-y-6">
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25, ease: 'easeOut' }}
+          className="mt-6 space-y-6"
+        >
           {/* Connected Organization Summary Bar */}
           <div className="p-4 rounded-2xl bg-slate-950 border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center space-x-3">
@@ -598,7 +762,7 @@ export const IntegrationsSection: React.FC<IntegrationsSectionProps> = ({
               </div>
             )}
           </div>
-        </div>
+        </motion.div>
       )}
     </div>
   );
