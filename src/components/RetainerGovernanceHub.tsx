@@ -379,7 +379,7 @@ Documents Included: ${docs.map((d) => d.docNumber).join(', ')}
           <button
             type="button"
             onClick={handleDownloadArchitectureDossier}
-            className="px-3.5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-orange-500/40 text-orange-300 font-mono text-xs font-semibold flex items-center space-x-1.5 transition-colors"
+            className="px-3.5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-orange-500/40 text-orange-600 dark:text-orange-300 font-mono text-xs font-semibold flex items-center space-x-1.5 transition-colors"
           >
             <FileText className="w-4 h-4 text-orange-400" />
             <span>Download Architecture Dossier</span>

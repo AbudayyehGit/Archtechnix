@@ -1,4 +1,5 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
+import { isSqlConnectionError } from './errors.ts';
 import { db, isSqlConfigured } from './index.ts';
 import {
   adrs,
@@ -43,28 +44,6 @@ const fallbackStore = {
 function genFallbackId(): number {
   fallbackStore.nextId += 1;
   return fallbackStore.nextId;
-}
-
-function isSqlConnectionError(err: unknown): boolean {
-  const checked = new Set<unknown>();
-  let cur: unknown = err;
-  while (cur && typeof cur === 'object' && !checked.has(cur)) {
-    checked.add(cur);
-    const code = (cur as { code?: string }).code;
-    const msg = (cur as { message?: string }).message || '';
-    if (
-      code === 'ECONNREFUSED' ||
-      code === 'ENOENT' ||
-      code === 'ENOTFOUND' ||
-      code === 'ETIMEDOUT' ||
-      code === '57P03' ||
-      msg.includes('ECONNREFUSED')
-    ) {
-      return true;
-    }
-    cur = (cur as { cause?: unknown }).cause;
-  }
-  return false;
 }
 
 function fallbackGetOrCreateClient(uid: string, email: string, orgName?: string): ClientRow {
