@@ -1204,6 +1204,25 @@ END:VCALENDAR`;
 const governanceStore = {
   steadyStates: [
     {
+      id: 'c9e25f30-1b44-4d93-9f5a-24b7c8d9e0f1',
+      checkpoint_label: 'steady-state-v2.7-github-sync-history',
+      git_commit_hash: 'v2.7-verified',
+      snapshot_metadata: {
+        blueprintVersion: 'v2.7.0-steady-state',
+        cleanupClean: true,
+        githubConnectionHistoryLog: true,
+        githubSyncStatusFramerBar: 'motion/react-scaleX',
+        connectGithubOrgButton: true,
+        customWarningThresholds: true,
+        historical30DayLagLineChart: true,
+        rpoRtoCsvExport: true,
+        pilotAuditComplianceExport: ['pdf', 'json'],
+        drDrillSimulator: true,
+        rlsEnforcedRole: 'admin_architect'
+      },
+      established_at: new Date('2026-11-15T15:10:00Z').toISOString()
+    },
+    {
       id: 'b7d14e20-9a33-4c82-8e4f-13a6b7c8d9e0',
       checkpoint_label: 'steady-state-v2.6-rpo-warning-trend-csv',
       git_commit_hash: 'v2.6-verified',
