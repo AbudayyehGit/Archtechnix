@@ -41,7 +41,7 @@ import {
 } from './types';
 import { PricingCalculator } from './components/PricingCalculator';
 import { IntakeGenerator } from './components/IntakeGenerator';
-import { OpaScanner } from './components/OpaScanner';
+import { OpaScanner, DEFAULT_OPA_REGO_POLICY } from './components/OpaScanner';
 import { AcademyWizard } from './components/AcademyWizard';
 import { GlobalModal } from './components/GlobalModal';
 import { SeoHead } from './components/SeoHead';
@@ -127,6 +127,7 @@ export default function App() {
   const [governanceHydrated, setGovernanceHydrated] = useState<boolean>(false);
   const [scopeBoundaries, setScopeBoundaries] = useState<ScopeBoundaryItem[]>([]);
   const [scopeHydrated, setScopeHydrated] = useState<boolean>(false);
+  const [opaPolicyCode, setOpaPolicyCode] = useState<string>(DEFAULT_OPA_REGO_POLICY);
   const [opaSummary, setOpaSummary] = useState<OpaPolicySummary>({
     allowed: true,
     code: 200,
@@ -1371,7 +1372,11 @@ ${JSON.stringify(webhookEvent, null, 2)}
                     </p>
                   </div>
 
-                  <OpaScanner onEvaluationChange={setOpaSummary} />
+                  <OpaScanner
+                    onEvaluationChange={setOpaSummary}
+                    policyCode={opaPolicyCode}
+                    onPolicyCodeChange={setOpaPolicyCode}
+                  />
                 </div>
               </section>
             </>
@@ -1409,6 +1414,8 @@ ${JSON.stringify(webhookEvent, null, 2)}
                   <IntegrationsSection 
                     onShowToast={showToast}
                     defaultOrg={intakeData.org}
+                    opaSummary={opaSummary}
+                    activeOpaPolicyCode={opaPolicyCode}
                     onRepositoryProvisioned={(repoData) => {
                       setIntakeData((prev) => ({
                         ...prev,

@@ -10,12 +10,7 @@ interface OPAResult {
   reasons: string[];
 }
 
-interface OpaScannerProps {
-  onEvaluationChange?: (summary: OpaPolicySummary) => void;
-}
-
-export const OpaScanner: React.FC<OpaScannerProps> = ({ onEvaluationChange }) => {
-  const [policyCode, setPolicyCode] = useState<string>(`package enterprise.compliance.storage
+export const DEFAULT_OPA_REGO_POLICY = `package enterprise.compliance.storage
 
 default allow = false
 
@@ -31,7 +26,25 @@ allow {
     input.resource_type == "ephemeral_runner"
     input.ttl_minutes <= 15
     input.cryptographic_shredding_enabled == true
-}`);
+}`;
+
+interface OpaScannerProps {
+  onEvaluationChange?: (summary: OpaPolicySummary) => void;
+  policyCode?: string;
+  onPolicyCodeChange?: (code: string) => void;
+}
+
+export const OpaScanner: React.FC<OpaScannerProps> = ({
+  onEvaluationChange,
+  policyCode: controlledPolicyCode,
+  onPolicyCodeChange,
+}) => {
+  const [internalPolicyCode, setInternalPolicyCode] = useState<string>(DEFAULT_OPA_REGO_POLICY);
+  const policyCode = controlledPolicyCode !== undefined ? controlledPolicyCode : internalPolicyCode;
+  const setPolicyCode = (nextCode: string) => {
+    setInternalPolicyCode(nextCode);
+    onPolicyCodeChange?.(nextCode);
+  };
 
   const [jsonInput, setJsonInput] = useState<string>(`{
   "resource_type": "aws_s3_bucket",
